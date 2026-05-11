@@ -9,3 +9,29 @@ services:
     envVars:
       - key: JWT_SECRET
         generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: LAB_STAFF_EMAIL
+        sync: false
+      - key: LAB_STAFF_PASSWORD
+        sync: false
+      - key: LAB_STAFF_NAME
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: STORE_HOST
+        sync: false
+      - key: LAB_HOST
+        sync: false
+      - key: N8N_ORDER_WEBHOOK_URL
+        sync: false
+      - key: N8N_LEAD_WEBHOOK_URL
+        sync: false
+      - key: N8N_BOOKING_WEBHOOK_URL
+        sync: false
+      - key: N8N_WEBHOOK_SECRET
+        sync: false
+      - key: STORE_PUBLIC_RATE_MAX
+        sync: false
+      - key: STORE_PUBLIC_RATE_WINDOW_MS
+        sync: false

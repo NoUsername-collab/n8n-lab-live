@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Magazin demo · n8n Lab</title>
+  <style>
+    :root {
+      --bg: #0a1520; --panel: #122a3d; --card: #1a3a52; --text: #f0f7fc; --muted: #94b0c4;
+      --accent: #2d9cdb; --accent-2: #27ae60; --border: #2a4a63; --danger: #e74c3c; --ok: #2ecc71;
+      --shadow: 0 10px 40px rgba(0,0,0,.28);
+    }
+    body[data-theme="light"] {
+      --bg: #f5f9fc; --panel: #fff; --card: #eef6fc; --text: #1a2f3d; --muted: #5a7589;
+      --accent: #1d7ed8; --accent-2: #1e9f5e; --border: #d4e4f2; --danger: #c0392b; --ok: #1a8f4a;
+      --shadow: 0 8px 28px rgba(30,80,120,.1);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin:0; font-family: Inter, Segoe UI, system-ui, sans-serif; background: linear-gradient(165deg, var(--bg), color-mix(in srgb, var(--bg), #000 12%)); color: var(--text); min-height: 100vh; }
+    a { color: var(--accent); }
+    .layout { max-width: 1120px; margin: 0 auto; padding: 16px 18px 48px; display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+    @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } aside.toc { position: relative; top: 0; } }
+    aside.toc { position: sticky; top: 12px; align-self: start; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); }
+    aside.toc h2 { margin: 0 0 10px; font-size: 1rem; }
+    aside.toc nav a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: .92rem; margin-bottom: 4px; }
+    aside.toc nav a:hover { background: color-mix(in srgb, var(--accent), transparent 88%); }
+    aside.toc .staff { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: .8rem; color: var(--muted); }
+    main section { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow); scroll-margin-top: 16px; }
+    section.booking-s { border-left: 4px solid #c9a227; }
+    main h1 { margin: 0 0 8px; font-size: 1.65rem; }
+    main h2 { margin: 0 0 12px; font-size: 1.15rem; }
+    .muted { color: var(--muted); font-size: .9rem; }
+    .tiny { font-size: .82rem; color: var(--muted); }
+    .topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+    select.theme { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text); }
+    .grid-p { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .card-p { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; cursor: pointer; transition: transform .15s, border-color .15s; }
+    .card-p:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+    .card-p .price { font-weight: 700; color: var(--accent-2); margin-top: 8px; }
+    label { display: block; margin: 10px 0 4px; font-size: .88rem; }
+    input, textarea, button { width: 100%; padding: 10px 11px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: .95rem; }
+    textarea { min-height: 100px; resize: vertical; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .btn-row button { width: auto; min-width: 110px; cursor: pointer; }
+    .btn-primary { background: color-mix(in srgb, var(--accent), var(--card) 55%); border-color: var(--accent); }
+    .btn-ok { background: color-mix(in srgb, var(--ok), var(--card) 50%); }
+    .btn-danger { background: color-mix(in srgb, var(--danger), var(--card) 55%); }
+    .status { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); font-size: .9rem; }
+    .status.ok { border-color: var(--ok); color: var(--ok); }
+    .status.warn { color: var(--muted); }
+    .cart-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: .92rem; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+    .modal-bg.on { display: flex; }
+    .modal { max-width: 520px; width: 100%; max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; box-shadow: var(--shadow); }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; color: var(--muted); }
+    .toast-wrap { position: fixed; right: 12px; top: 12px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
+    .toast { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font-size: .88rem; animation: t .2s ease; }
+    @keyframes t { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 640px) { .split { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="toast-wrap" id="toasts"></div>
+  <div class="layout">
+    <aside class="toc">
+      <div class="topbar" style="margin:0 0 8px;">
+        <strong style="font-size:.95rem;">Cuprins</strong>
+        <select class="theme" id="themeSel" aria-label="Tema">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+      <nav>
+        <a href="#acasa">Acasă</a>
+        <a href="#produse">Produse</a>
+        <a href="#cos">Coș</a>
+        <a href="#cont">Cont client</a>
+        <a href="#comenzi">Comenzile mele</a>
+        <a href="#rezervari">Rezervări</a>
+        <a href="#contact">Lead / contact</a>
+      </nav>
+      <div class="staff">Echipă / n8n: <a href="/lab/">Lab staff →</a></div>
+    </aside>
+    <main>
+      <section id="acasa">
+        <h1>Magazin demo</h1>
+        <p class="muted">Catalog, coș, cont, comenzi (<code>order.created</code>), cazări demo (<code>booking.requested</code>), lead (<code>lead.created</code>). Webhook-uri opționale către n8n.</p>
+      </section>
+
+      <section id="produse">
+        <h2>Produse</h2>
+        <p class="tiny">Click pe card pentru descriere (antrenare bot / FAQ mai târziu).</p>
+        <div id="productGrid" class="grid-p"></div>
+        <p id="prodErr" class="muted" style="display:none;"></p>
+      </section>
+
+      <section id="cos">
+        <h2>Coș</h2>
+        <div id="cartBody"></div>
+        <div class="btn-row">
+          <button type="button" class="btn-primary" id="btnCheckout">Plasează comanda</button>
+          <button type="button" id="btnClearCart">Golește coșul</button>
+        </div>
+        <p class="tiny" id="cartHint">Trebuie să fii logat ca <strong>client</strong> pentru checkout.</p>
+      </section>
+
+      <section id="cont">
+        <h2>Cont client</h2>
+        <p class="tiny">Doar clienți magazin (<code>role=customer</code>). Staff folosește <a href="/lab/">/lab/</a>.</p>
+        <div id="guestAuth" class="split">
+          <div>
+            <h3 style="margin-top:0;font-size:1rem;">Înregistrare</h3>
+            <label>Nume</label><input id="regName" placeholder="Alex" />
+            <label>Email</label><input id="regEmail" type="email" />
+            <label>Parolă</label><input id="regPass" type="password" />
+            <div class="btn-row"><button type="button" class="btn-ok" id="btnReg">Creează cont</button></div>
+          </div>
+          <div>
+            <h3 style="margin-top:0;font-size:1rem;">Login</h3>
+            <label>Email</label><input id="logEmail" type="email" />
+            <label>Parolă</label><input id="logPass" type="password" />
+            <div class="btn-row"><button type="button" class="btn-primary" id="btnLog">Autentificare</button></div>
+          </div>
+        </div>
+        <div id="loggedPanel" style="display:none;">
+          <p class="status ok" id="loggedLine"></p>
+          <p class="tiny">ID cont: <span class="mono" id="uidLine"></span></p>
+          <div class="btn-row"><button type="button" class="btn-danger" id="btnOut">Logout</button></div>
+        </div>
+        <div id="authMsg" class="status warn" style="display:none;margin-top:10px;"></div>
+      </section>
+
+      <section id="comenzi">
+        <h2>Comenzile mele</h2>
+        <div class="btn-row"><button type="button" class="btn-primary" id="btnLoadOrders">Reîncarcă</button></div>
+        <div id="ordersBox" style="margin-top:12px;font-size:.9rem;"></div>
+      </section>
+
+      <section id="rezervari" class="booking-s">
+        <h2>Rezervări (cazări · demo)</h2>
+        <p class="tiny">Cerere publică — limite anti-spam împărțite cu formularul de lead. Dacă ești logat, cererea se leagă automat de cont. Eveniment <code>booking.requested</code>.</p>
+        <div class="split">
+          <div>
+            <label>Email *</label><input id="bkgEmail" type="email" />
+            <label>Nume</label><input id="bkgName" />
+            <label>Check-in</label><input id="bkgIn" type="date" />
+            <label>Check-out</label><input id="bkgOut" type="date" />
+          </div>
+          <div>
+            <label>Oaspeți</label><input id="bkgGuests" type="number" min="1" max="20" value="2" />
+            <label>Tip cameră</label>
+            <select id="bkgRoom">
+              <option value="standard">Standard</option>
+              <option value="deluxe">Deluxe</option>
+              <option value="family">Family</option>
+              <option value="suite">Suite</option>
+            </select>
+            <label>Mențiuni</label><textarea id="bkgNotes" placeholder="Pat suplimentar, late check-out…"></textarea>
+            <div class="btn-row"><button type="button" class="btn-ok" id="btnBkg">Trimite cererea</button></div>
+          </div>
+        </div>
+        <h3 style="margin:20px 0 8px;font-size:1rem;">Rezervările mele</h3>
+        <div class="btn-row"><button type="button" class="btn-primary" id="btnLoadBkg">Reîncarcă lista</button></div>
+        <div id="bkgBox" style="margin-top:12px;font-size:.9rem;"></div>
+      </section>
+
+      <section id="contact">
+        <h2>Lead / contact</h2>
+        <p class="tiny">Public — fără cont. Generează eveniment <code>lead.created</code> pentru n8n.</p>
+        <label>Email *</label><input id="leadEmail" type="email" />
+        <label>Nume</label><input id="leadName" />
+        <label>Mesaj</label><textarea id="leadMsg" placeholder="Întrebare despre produs, buget, etc."></textarea>
+        <label>Produs (opțional)</label>
+        <select id="leadProd"><option value="">—</option></select>
+        <div class="btn-row"><button type="button" class="btn-ok" id="btnLead">Trimite</button></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-bg" id="modalBg" aria-hidden="true">
+    <div class="modal">
+      <h2 id="mTitle" style="margin-top:0;"></h2>
+      <p class="mono" id="mSlug"></p>
+      <p id="mDesc" style="line-height:1.5;"></p>
+      <p class="price" id="mPrice"></p>
+      <div class="btn-row">
+        <button type="button" class="btn-primary" id="mAdd">Adaugă în coș</button>
+        <button type="button" id="mClose">Închide</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const LS = { cart: "store_cart", token: "store_token", user: "store_user", theme: "store_theme" };
+    const state = { token: localStorage.getItem(LS.token) || "", user: JSON.parse(localStorage.getItem(LS.user) || "null"), cart: JSON.parse(localStorage.getItem(LS.cart) || "[]"), detail: null };
+    const el = { toasts: document.getElementById("toasts"), themeSel: document.getElementById("themeSel"), grid: document.getElementById("productGrid"), prodErr: document.getElementById("prodErr"), cartBody: document.getElementById("cartBody"), cartHint: document.getElementById("cartHint"), guestAuth: document.getElementById("guestAuth"), loggedPanel: document.getElementById("loggedPanel"), loggedLine: document.getElementById("loggedLine"), uidLine: document.getElementById("uidLine"), authMsg: document.getElementById("authMsg"), ordersBox: document.getElementById("ordersBox"), bkgBox: document.getElementById("bkgBox"), leadProd: document.getElementById("leadProd"), modalBg: document.getElementById("modalBg"), mTitle: document.getElementById("mTitle"), mSlug: document.getElementById("mSlug"), mDesc: document.getElementById("mDesc"), mPrice: document.getElementById("mPrice") };
+
+    function toast(m, ok = true) { const t = document.createElement("div"); t.className = "toast"; t.style.borderColor = ok ? "var(--ok)" : "var(--danger)"; t.textContent = m; el.toasts.appendChild(t); setTimeout(() => t.remove(), 2600); }
+    function saveCart() { localStorage.setItem(LS.cart, JSON.stringify(state.cart)); }
+    function saveAuth() { localStorage.setItem(LS.token, state.token || ""); localStorage.setItem(LS.user, JSON.stringify(state.user)); }
+    async function api(path, opts = {}) {
+      const r = await fetch(path, opts);
+      const txt = await r.text();
+      let d = txt;
+      try { d = JSON.parse(txt); } catch (_) {}
+      if (!r.ok) {
+        let msg = (d && d.error) || txt || `HTTP ${r.status}`;
+        if (r.status === 429 && d && d.retryAfterSec != null) msg += ` Reîncearcă peste ~${d.retryAfterSec}s.`;
+        throw new Error(msg);
+      }
+      return d;
+    }
+
+    function renderAuth() {
+      const logged = Boolean(state.token && state.user);
+      el.guestAuth.style.display = logged ? "none" : "grid";
+      el.loggedPanel.style.display = logged ? "block" : "none";
+      el.cartHint.textContent = logged ? "Poți plasa comanda." : "Trebuie să fii logat ca client pentru checkout.";
+      if (logged) {
+        el.loggedLine.textContent = `Conectat: ${state.user.email}`;
+        el.uidLine.textContent = state.user.id || "—";
+      }
+    }
+
+    function renderCart() {
+      if (!state.cart.length) { el.cartBody.innerHTML = '<p class="muted">Coșul e gol.</p>'; return; }
+      el.cartBody.innerHTML = state.cart.map((l, i) => `
+        <div class="cart-line">
+          <span>${l.name} × ${l.qty}</span>
+          <span>${(l.qty * l.price).toFixed(2)} ${l.currency || "EUR"}</span>
+          <button type="button" data-i="${i}" class="rm" style="width:auto;padding:4px 8px;">−</button>
+        </div>`).join("");
+      el.cartBody.querySelectorAll(".rm").forEach((b) => b.addEventListener("click", () => {
+        state.cart.splice(Number(b.dataset.i), 1); saveCart(); renderCart();
+      }));
+    }
+
+    async function loadProducts() {
+      el.prodErr.style.display = "none";
+      try {
+        const d = await api("/api/store/products");
+        el.grid.innerHTML = "";
+        el.leadProd.innerHTML = '<option value="">—</option>';
+        (d.items || []).forEach((p) => {
+          const o = document.createElement("option"); o.value = p.id; o.textContent = p.name; el.leadProd.appendChild(o);
+          const c = document.createElement("div"); c.className = "card-p"; c.dataset.id = p.id;
+          c.innerHTML = `<strong>${escapeHtml(p.name)}</strong><div class="price">${p.price} ${p.currency}</div><div class="tiny">${escapeHtml((p.summary || "").slice(0, 80))}…</div>`;
+          c.addEventListener("click", () => openProduct(p.id));
+          el.grid.appendChild(c);
+        });
+      } catch (e) { el.prodErr.textContent = e.message; el.prodErr.style.display = "block"; }
+    }
+
+    function escapeHtml(s) { return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+    async function openProduct(id) {
+      try {
+        const d = await api("/api/store/products/" + encodeURIComponent(id));
+        state.detail = d.product;
+        el.mTitle.textContent = d.product.name;
+        el.mSlug.textContent = d.product.slug || d.product.id;
+        el.mDesc.textContent = d.product.description || "—";
+        el.mPrice.textContent = `${d.product.price} ${d.product.currency} · stoc ${d.product.stock}`;
+        el.modalBg.classList.add("on");
+      } catch (e) { toast(e.message, false); }
+    }
+
+    document.getElementById("mClose").addEventListener("click", () => { el.modalBg.classList.remove("on"); });
+    el.modalBg.addEventListener("click", (ev) => { if (ev.target === el.modalBg) el.modalBg.classList.remove("on"); });
+    document.getElementById("mAdd").addEventListener("click", () => {
+      if (!state.detail) return;
+      const ex = state.cart.find((x) => x.productId === state.detail.id);
+      if (ex) ex.qty += 1;
+      else state.cart.push({ productId: state.detail.id, name: state.detail.name, price: state.detail.price, currency: state.detail.currency, qty: 1 });
+      saveCart(); renderCart(); toast("Adăugat în coș"); el.modalBg.classList.remove("on");
+    });
+
+    document.getElementById("btnClearCart").addEventListener("click", () => { state.cart = []; saveCart(); renderCart(); });
+
+    document.getElementById("btnCheckout").addEventListener("click", async () => {
+      if (!state.token) { toast("Autentifică-te la Cont client.", false); return; }
+      if (!state.cart.length) { toast("Coșul e gol.", false); return; }
+      try {
+        const items = state.cart.map((c) => ({ productId: c.productId, qty: c.qty }));
+        await api("/api/store/orders", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify({ items }) });
+        state.cart = []; saveCart(); renderCart(); toast("Comandă plasată!");
+        loadOrders();
+      } catch (e) { toast(e.message, false); }
+    });
+
+    document.getElementById("btnReg").addEventListener("click", async () => {
+      el.authMsg.style.display = "none";
+      try {
+        const body = { name: document.getElementById("regName").value.trim(), email: document.getElementById("regEmail").value.trim(), password: document.getElementById("regPass").value };
+        const d = await api("/api/store/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        state.token = d.token; state.user = d.user; saveAuth(); renderAuth(); toast("Cont creat și autentificat");
+      } catch (e) { el.authMsg.textContent = e.message; el.authMsg.style.display = "block"; toast(e.message, false); }
+    });
+
+    document.getElementById("btnLog").addEventListener("click", async () => {
+      el.authMsg.style.display = "none";
+      try {
+        const d = await api("/api/store/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: document.getElementById("logEmail").value.trim(), password: document.getElementById("logPass").value }) });
+        state.token = d.token; state.user = d.user; saveAuth(); renderAuth(); toast("Autentificat");
+      } catch (e) { el.authMsg.textContent = e.message; el.authMsg.style.display = "block"; toast(e.message, false); }
+    });
+
+    document.getElementById("btnOut").addEventListener("click", () => { state.token = ""; state.user = null; saveAuth(); renderAuth(); toast("Logout"); });
+
+    async function loadOrders() {
+      if (!state.token) { el.ordersBox.innerHTML = '<p class="muted">Loghează-te pentru a vedea comenzile.</p>'; return; }
+      try {
+        const d = await api("/api/store/orders", { headers: { Authorization: "Bearer " + state.token } });
+        const items = d.items || [];
+        if (!items.length) { el.ordersBox.innerHTML = "<p class=\"muted\">Nicio comandă încă.</p>"; return; }
+        el.ordersBox.innerHTML = items.map((o) => `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;"><strong class="mono">${o.id}</strong> · ${o.total} ${o.currency} · ${new Date(o.createdAt).toLocaleString()}<div class="tiny">${(o.items || []).map((i) => i.name + "×" + i.qty).join(", ")}</div></div>`).join("");
+      } catch (e) { el.ordersBox.innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`; }
+    }
+
+    document.getElementById("btnLoadOrders").addEventListener("click", loadOrders);
+
+    document.getElementById("btnLead").addEventListener("click", async () => {
+      try {
+        const email = document.getElementById("leadEmail").value.trim();
+        if (!email) throw new Error("Email obligatoriu");
+        const body = { email, name: document.getElementById("leadName").value.trim() || undefined, message: document.getElementById("leadMsg").value.trim() || undefined, productId: el.leadProd.value || undefined };
+        await api("/api/store/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        toast("Lead trimis — verifică n8n / lab events");
+        document.getElementById("leadMsg").value = "";
+      } catch (e) { toast(e.message, false); }
+    });
+
+    async function loadBookings() {
+      if (!state.token) { el.bkgBox.innerHTML = '<p class="muted">Loghează-te pentru rezervări legate de cont (opțional pentru cereri noi).</p>'; return; }
+      try {
+        const d = await api("/api/store/bookings/me", { headers: { Authorization: "Bearer " + state.token } });
+        const items = d.items || [];
+        if (!items.length) { el.bkgBox.innerHTML = "<p class=\"muted\">Nicio rezervare încă.</p>"; return; }
+        el.bkgBox.innerHTML = items.map((b) => `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;"><span class="mono">${b.id}</span> · ${b.checkIn} → ${b.checkOut} · ${b.guests} pers. · <em>${b.status}</em><div class="tiny">${escapeHtml(b.roomType || "")}</div></div>`).join("");
+      } catch (e) { el.bkgBox.innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`; }
+    }
+
+    document.getElementById("btnLoadBkg").addEventListener("click", loadBookings);
+
+    document.getElementById("btnBkg").addEventListener("click", async () => {
+      try {
+        const email = document.getElementById("bkgEmail").value.trim();
+        if (!email) throw new Error("Email obligatoriu");
+        const body = {
+          email,
+          name: document.getElementById("bkgName").value.trim() || undefined,
+          checkIn: document.getElementById("bkgIn").value,
+          checkOut: document.getElementById("bkgOut").value,
+          guests: Number(document.getElementById("bkgGuests").value) || 2,
+          roomType: document.getElementById("bkgRoom").value,
+          notes: document.getElementById("bkgNotes").value.trim() || undefined
+        };
+        const headers = { "Content-Type": "application/json" };
+        if (state.token) headers.Authorization = "Bearer " + state.token;
+        await api("/api/store/bookings", { method: "POST", headers, body: JSON.stringify(body) });
+        toast("Cerere înregistrată — vezi evenimente în lab");
+        loadBookings();
+      } catch (e) { toast(e.message, false); }
+    });
+
+    el.themeSel.value = localStorage.getItem(LS.theme) || "dark";
+    document.body.dataset.theme = el.themeSel.value;
+    el.themeSel.addEventListener("change", () => { localStorage.setItem(LS.theme, el.themeSel.value); document.body.dataset.theme = el.themeSel.value; });
+
+    renderAuth(); renderCart(); loadProducts(); loadOrders(); loadBookings();
+  </script>
+</body>
+</html>

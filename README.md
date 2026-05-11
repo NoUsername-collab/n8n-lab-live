@@ -1,79 +1,78 @@
 # n8n Lab Live
 
-Live playground for learning n8n with:
-- webhook testing UI
-- auth (register/login with JWT)
-- mock e-commerce APIs (products, orders, events)
-- PostgreSQL persistence (users/orders/events)
-- didactic roadmap and guided labs
+Playground for learning **n8n** with a clean split:
+
+| Surface | URL | Who | Purpose |
+|--------|-----|-----|---------|
+| **Magazin (demo e-commerce)** | `/store/` | Testers, clients | Catalog, coș, cont **client**, comenzi, **rezervări**, lead public |
+| **Lab (staff)** | `/lab/` | Doar echipa | Webhook-uri, timeline evenimente, simulări, listă useri + cheie admin |
+| **API** | `/api/...` | Both | JSON pentru workflow-uri n8n |
+
+## Arhitectură
+
+- **`users.role`**: `customer` (magazin) sau `staff` (lab). Înregistrarea publică creează doar **customer**. Staff se creează din env **`LAB_STAFF_EMAIL`** + **`LAB_STAFF_PASSWORD`** la primul boot (dacă emailul nu există).
+- **Store API** — prefix **`/api/store/`** (login/register doar clienți; lead fără auth).
+- **Lab API** — prefix **`/api/lab/`** (necesită JWT **staff**). Gestionarea listei de useri: **`/api/lab/admin/users`** + opțional header **`x-admin-key`** dacă `ADMIN_KEY` e setat pe server.
+- **Evenimente** (`order.created`, `lead.created`, `booking.requested`, …) în **`events`**; staff le vede în lab. Leaduri în **`leads`**, rezervări în **`bookings`**.
+- **Webhook-uri outbound** (opțional): după commit în DB, serverul trimite `POST` JSON către `N8N_*_WEBHOOK_URL`. Semnătură opțională HMAC-SHA256 în header **`X-Lab-Signature: sha256=<hex>`** dacă setezi **`N8N_WEBHOOK_SECRET`** (verifică în n8n cu Crypto node).
+- **Rate limit** comun pentru **`POST /api/store/leads`** și **`POST /api/store/bookings`**: `STORE_PUBLIC_RATE_MAX` cereri / `STORE_PUBLIC_RATE_WINDOW_MS` per IP (implicit 40 / 15 min). Răspuns **429** + `retryAfterSec`.
+- **Host-uri dedicate** (opțional): `STORE_HOST` / `LAB_HOST` (fără port) — cererea `GET /` pe acel host redirecționează către `/store/` sau `/lab/` (DNS CNAME către același serviciu Render).
 
 ## Run locally
 
-1. Install dependencies:
-
 ```bash
 npm install
-```
-
-2. Copy env:
-
-```bash
 copy .env.example .env
 ```
 
-3. Set `DATABASE_URL` in `.env` (required, Postgres connection string).
-
-4. Start:
+Setează în `.env`: `DATABASE_URL`, `JWT_SECRET`, și **obligatoriu pentru lab** `LAB_STAFF_EMAIL` + `LAB_STAFF_PASSWORD`.
 
 ```bash
 npm start
 ```
 
-5. Open:
-- `http://localhost:3000`
+- Magazin: http://localhost:3000/store/
+- Lab staff: http://localhost:3000/lab/
 
-## API endpoints
+## API (rezumat)
 
-- `GET /api/health`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/me` (auth)
-- `GET /api/account` (auth) — reads your row from `users` (no admin key; use this to confirm the account exists after login)
+**Public / magazin**
 
-**Admin user list:** `GET /api/admin/users` is protected when `ADMIN_KEY` is set on the server. The lab UI must send the same value in **Admin Key** (`x-admin-key`). Without it, the list returns 403 even though login and `/api/account` work.
-- `GET /api/products`
-- `POST /api/orders` (auth)
-- `GET /api/orders` (auth)
-- `GET /api/events` (auth)
-- `POST /api/events/simulate` (auth)
-- `GET /api/n8n/webhook-payload/order-created/:id` (auth)
+- `GET /api/health` — include steaguri `webhooks`, `hosts`, `rateLimit`
+- `GET /api/store/products` · `GET /api/store/products/:idOrSlug`
+- `POST /api/store/auth/register` · `POST /api/store/auth/login` (doar customer)
+- `POST /api/store/leads` (fără auth, rate limit)
+- `POST /api/store/bookings` (fără auth obligatoriu; rate limit; `Authorization: Bearer` opțional pentru legare cont)
+- `GET /api/store/bookings/me` (JWT customer)
+- `GET /api/store/account` · `POST /api/store/orders` · `GET /api/store/orders` (JWT customer)
 
-## Deploy on Render (quickest)
+**Lab (JWT staff)**
 
-1. Push this folder to GitHub.
-2. In Render, create a **new Blueprint** and select the repo.
-3. Render auto-detects `render.yaml`.
-4. Set/confirm environment variables:
-   - `JWT_SECRET`
-   - `ADMIN_KEY` (optional, recommended)
-   - `DATABASE_URL` (required)
-5. Deploy.
+- `POST /api/lab/auth/login`
+- `GET /api/lab/me` · `GET /api/lab/account`
+- `GET /api/lab/events` · `POST /api/lab/events/simulate`
+- `GET /api/lab/orders` (toate comenzile + email client)
+- `POST /api/lab/orders` — body `{ "customerUserId", "items" }` (test din lab)
+- `GET /api/lab/leads`
+- `GET /api/lab/bookings`
+- `GET /api/lab/admin/users` · `POST /api/lab/admin/users` (+ `x-admin-key` dacă `ADMIN_KEY` e setat)
+- `GET /api/lab/n8n/webhook-payload/order-created/:id`
 
-After deploy, open your URL and set **API Base URL** to the same URL.
+**Legacy (compat)**
 
-## Render Postgres setup (Etapa 1)
+- `GET /api/products` — același catalog ca store
+- `POST /api/auth/login` — login unic (customer sau staff); preferă rutele `/api/store/` și `/api/lab/`.
 
-1. In Render dashboard: **New +** -> **PostgreSQL**
-2. Create database (free plan is fine for learning).
-3. Open the DB and copy **External Database URL**.
-4. In your `n8n-lab-live` web service -> **Environment**:
-   - set `DATABASE_URL` to that value
-   - keep `JWT_SECRET` and `ADMIN_KEY`
-5. Redeploy latest commit.
+## Deploy (Render)
 
-## n8n real-world tests you can do now
+Setează variabile: `DATABASE_URL`, `JWT_SECRET`, `LAB_STAFF_EMAIL`, `LAB_STAFF_PASSWORD`, opțional `ADMIN_KEY`, `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit.
 
-- `Webhook -> Validate -> Google Sheets -> Gmail`
-- `Order created event -> Slack/Email alert`
-- `Lead event simulation -> CRM route by score`
-- `RAG question payload -> vector flow`
+După deploy: URL-ul serviciului = și **API Base** în lab, și originea pentru fetch în magazin (același host).
+
+## n8n — idei de workflow
+
+- Webhook magazin: `POST /api/store/leads` din formular extern sau din n8n HTTP Request către magazin.
+- Polling: `GET /api/lab/events` cu token staff (după `POST /api/lab/auth/login`).
+- Comandă nouă: eveniment `order.created` în DB după `POST /api/store/orders` sau `POST /api/lab/orders`; același flux poate declanșa și **webhook outbound** `N8N_ORDER_WEBHOOK_URL`.
+- Rezervare: formular magazin → `booking.requested` + `N8N_BOOKING_WEBHOOK_URL`.
+- Lead: `N8N_LEAD_WEBHOOK_URL`. Envelope JSON: `{ source, kind, emittedAt, data }`.

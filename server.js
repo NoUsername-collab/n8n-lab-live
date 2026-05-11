@@ -1,16 +1,29 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { nanoid } = require("nanoid");
 const { Pool } = require("pg");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const ADMIN_KEY = process.env.ADMIN_KEY || "";
 const DATABASE_URL = process.env.DATABASE_URL || "";
+const LAB_STAFF_EMAIL = (process.env.LAB_STAFF_EMAIL || "").trim().toLowerCase();
+const LAB_STAFF_PASSWORD = process.env.LAB_STAFF_PASSWORD || "";
+const LAB_STAFF_NAME = process.env.LAB_STAFF_NAME || "Lab Staff";
+const STORE_HOST = (process.env.STORE_HOST || "").trim().toLowerCase();
+const LAB_HOST = (process.env.LAB_HOST || "").trim().toLowerCase();
+const N8N_ORDER_WEBHOOK_URL = (process.env.N8N_ORDER_WEBHOOK_URL || "").trim();
+const N8N_LEAD_WEBHOOK_URL = (process.env.N8N_LEAD_WEBHOOK_URL || "").trim();
+const N8N_BOOKING_WEBHOOK_URL = (process.env.N8N_BOOKING_WEBHOOK_URL || "").trim();
+const N8N_WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || "";
+const STORE_PUBLIC_RATE_WINDOW_MS = Number(process.env.STORE_PUBLIC_RATE_WINDOW_MS) || 15 * 60 * 1000;
+const STORE_PUBLIC_RATE_MAX = Number(process.env.STORE_PUBLIC_RATE_MAX) || 40;
 
 if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is required. Add a Postgres connection string in environment variables.");
@@ -24,11 +37,81 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) return next();
+  const host = (req.get("host") || "").split(":")[0].toLowerCase();
+  if (LAB_HOST && host === LAB_HOST && req.path === "/") return res.redirect(302, "/lab/");
+  if (STORE_HOST && host === STORE_HOST && req.path === "/") return res.redirect(302, "/store/");
+  next();
+});
+
+function createWindowLimiter({ windowMs, max }) {
+  const hits = new Map();
+  return function limit(key) {
+    const now = Date.now();
+    const row = hits.get(key);
+    if (!row || now > row.resetAt) {
+      hits.set(key, { count: 1, resetAt: now + windowMs });
+      return { ok: true, remaining: max - 1, resetAt: now + windowMs };
+    }
+    if (row.count >= max) return { ok: false, remaining: 0, resetAt: row.resetAt };
+    row.count += 1;
+    return { ok: true, remaining: max - row.count, resetAt: row.resetAt };
+  };
+}
+
+const publicFormLimiter = createWindowLimiter({ windowMs: STORE_PUBLIC_RATE_WINDOW_MS, max: STORE_PUBLIC_RATE_MAX });
+
+function publicFormRateLimit(req, res, next) {
+  const key = `pf:${req.ip || "unknown"}`;
+  const r = publicFormLimiter(key);
+  if (!r.ok) {
+    const retryAfterSec = Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000));
+    res.set("Retry-After", String(retryAfterSec));
+    return res.status(429).json({ error: "Prea multe cereri. Incearca din nou peste cateva minute.", retryAfterSec });
+  }
+  res.set("X-RateLimit-Remaining", String(r.remaining));
+  next();
+}
+
+async function dispatchN8nWebhook(kind, data) {
+  const url =
+    kind === "order" ? N8N_ORDER_WEBHOOK_URL : kind === "lead" ? N8N_LEAD_WEBHOOK_URL : kind === "booking" ? N8N_BOOKING_WEBHOOK_URL : "";
+  if (!url) return;
+  const envelope = { source: "n8n-lab-live", kind, emittedAt: new Date().toISOString(), data };
+  const json = JSON.stringify(envelope);
+  const headers = { "Content-Type": "application/json", "User-Agent": "n8n-lab-live/1" };
+  if (N8N_WEBHOOK_SECRET) {
+    const sig = crypto.createHmac("sha256", N8N_WEBHOOK_SECRET).update(json).digest("hex");
+    headers["X-Lab-Signature"] = `sha256=${sig}`;
+  }
+  const ac = new AbortController();
+  const tid = setTimeout(() => ac.abort(), 12000);
+  try {
+    const r = await fetch(url, { method: "POST", headers, body: json, signal: ac.signal });
+    if (!r.ok) console.error(`[webhook ${kind}] HTTP ${r.status}`);
+  } catch (e) {
+    console.error(`[webhook ${kind}]`, e.name === "AbortError" ? "timeout" : e.message || e);
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 async function query(text, params = []) {
   return pool.query(text, params);
 }
 
-async function initDb() {
+function slugify(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "item";
+}
+
+async function migrate() {
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -39,6 +122,9 @@ async function initDb() {
     );
   `);
 
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'customer';`);
+  await query(`UPDATE users SET role = 'customer' WHERE role IS NULL OR role = '';`);
+
   await query(`
     CREATE TABLE IF NOT EXISTS products (
       id TEXT PRIMARY KEY,
@@ -48,6 +134,11 @@ async function initDb() {
       stock INTEGER NOT NULL DEFAULT 0
     );
   `);
+  await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS slug TEXT;`);
+  await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT;`);
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS products_slug_unique ON products (lower(slug)) WHERE slug IS NOT NULL AND slug <> '';`
+  );
 
   await query(`
     CREATE TABLE IF NOT EXISTS orders (
@@ -82,32 +173,117 @@ async function initDb() {
     );
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS leads (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      name TEXT,
+      message TEXT,
+      product_id TEXT,
+      source TEXT NOT NULL DEFAULT 'store',
+      meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      email TEXT NOT NULL,
+      name TEXT,
+      check_in DATE NOT NULL,
+      check_out DATE NOT NULL,
+      guests INTEGER NOT NULL DEFAULT 1,
+      room_type TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'requested',
+      meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  const prows = await query(`SELECT id, name, slug FROM products`);
+  for (const row of prows.rows) {
+    if (!row.slug) {
+      const base = slugify(row.name);
+      let slug = base;
+      let n = 1;
+      while (true) {
+        const clash = await query(`SELECT 1 FROM products WHERE lower(slug) = lower($1) AND id <> $2 LIMIT 1`, [slug, row.id]);
+        if (!clash.rowCount) break;
+        slug = `${base}-${n++}`;
+      }
+      await query(`UPDATE products SET slug = $1 WHERE id = $2`, [slug, row.id]);
+    }
+  }
+
+  const desc = {
+    prod_1: "Audit rapid al fluxurilor tale de automatizare: inventar noduri, riscuri, quick wins.",
+    prod_2: "Sablon n8n pentru formulare, validare, CRM si notificari — ideal pentru training.",
+    prod_3: "Suport prioritar n8n: debugging workflow, review PR, consultanta lunara."
+  };
+  for (const [id, text] of Object.entries(desc)) {
+    await query(`UPDATE products SET description = COALESCE(NULLIF(description, ''), $1) WHERE id = $2`, [text, id]);
+  }
+
   const countResult = await query(`SELECT COUNT(*)::int AS count FROM products`);
   if (countResult.rows[0].count === 0) {
     await query(
       `
-      INSERT INTO products (id, name, price, currency, stock)
+      INSERT INTO products (id, name, slug, price, currency, stock, description)
       VALUES
-        ('prod_1', 'Starter Automation Audit', 79, 'EUR', 20),
-        ('prod_2', 'Lead Capture Workflow Pack', 149, 'EUR', 12),
-        ('prod_3', 'n8n Support Retainer (monthly)', 199, 'EUR', 99)
-      `
+        ('prod_1', 'Starter Automation Audit', 'starter-automation-audit', 79, 'EUR', 20, $1),
+        ('prod_2', 'Lead Capture Workflow Pack', 'lead-capture-workflow-pack', 149, 'EUR', 12, $2),
+        ('prod_3', 'n8n Support Retainer (monthly)', 'n8n-support-retainer-monthly', 199, 'EUR', 99, $3)
+      `,
+      [desc.prod_1, desc.prod_2, desc.prod_3]
     );
   }
 }
 
-function authRequired(req, res, next) {
+async function ensureStaffUser() {
+  if (!LAB_STAFF_EMAIL || !LAB_STAFF_PASSWORD) return;
+  const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [LAB_STAFF_EMAIL]);
+  if (existing.rowCount) return;
+  const passwordHash = await bcrypt.hash(LAB_STAFF_PASSWORD, 10);
+  await query(
+    `INSERT INTO users (id, email, name, password_hash, role) VALUES ($1, $2, $3, $4, 'staff')`,
+    [nanoid(10), LAB_STAFF_EMAIL, LAB_STAFF_NAME, passwordHash]
+  );
+  console.log(`[init] Staff user created: ${LAB_STAFF_EMAIL} (role=staff). Change password after first deploy.`);
+}
+
+async function initDb() {
+  await migrate();
+  await ensureStaffUser();
+}
+
+function signUserToken(user) {
+  const role = user.role || "customer";
+  return jwt.sign({ sub: user.id, email: user.email, name: user.name, role }, JWT_SECRET, { expiresIn: "7d" });
+}
+
+function verifyToken(req, res, next) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) return res.status(401).json({ error: "Missing token" });
-
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload;
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (_) {
     res.status(401).json({ error: "Invalid token" });
   }
+}
+
+function requireStaff(req, res, next) {
+  if (req.user.role !== "staff") return res.status(403).json({ error: "Staff access required" });
+  next();
+}
+
+function requireCustomer(req, res, next) {
+  if (req.user.role !== "customer") return res.status(403).json({ error: "Customer token required — use the public store at /store/" });
+  next();
 }
 
 function adminGuard(req, res, next) {
@@ -117,20 +293,151 @@ function adminGuard(req, res, next) {
   next();
 }
 
-function publicUser(user) {
-  return {
+function publicUser(user, { includeRole = false } = {}) {
+  const o = {
     id: user.id,
     email: user.email,
     name: user.name,
     createdAt: user.created_at || user.createdAt
   };
+  if (includeRole) o.role = user.role || "customer";
+  return o;
 }
 
+async function loginUserRow(email, password) {
+  const result = await query(
+    `SELECT id, email, name, password_hash, role, created_at FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+    [email]
+  );
+  if (!result.rowCount) return null;
+  const user = result.rows[0];
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return null;
+  return user;
+}
+
+async function insertEventRow(type, payload) {
+  const id = "evt_" + nanoid(10);
+  await query(`INSERT INTO events (id, type, payload) VALUES ($1, $2, $3::jsonb)`, [id, type, JSON.stringify(payload)]);
+  return { id, type, payload, createdAt: new Date().toISOString() };
+}
+
+async function createOrderForUserId(userId, items, client) {
+  const run = client ? client.query.bind(client) : query;
+  if (!Array.isArray(items) || items.length === 0) throw new Error("items[] is required");
+  const lineItems = [];
+  let total = 0;
+
+  for (const line of items) {
+    const productResult = await run(`SELECT id, name, price::float AS price FROM products WHERE id = $1 LIMIT 1`, [line.productId]);
+    if (!productResult.rowCount) throw new Error(`Unknown product: ${line.productId}`);
+    const product = productResult.rows[0];
+    const qty = Number(line.qty || 1);
+    if (!Number.isFinite(qty) || qty < 1) throw new Error("qty must be >= 1");
+    const lineTotal = Number((qty * Number(product.price)).toFixed(2));
+    lineItems.push({
+      productId: product.id,
+      name: product.name,
+      qty,
+      unitPrice: Number(product.price),
+      lineTotal
+    });
+    total += lineTotal;
+  }
+
+  const orderId = "ord_" + nanoid(8);
+  await run(
+    `INSERT INTO orders (id, user_id, total, currency, status) VALUES ($1, $2, $3, 'EUR', 'created')`,
+    [orderId, userId, Number(total.toFixed(2))]
+  );
+
+  for (const item of lineItems) {
+    await run(
+      `INSERT INTO order_items (order_id, product_id, name, qty, unit_price, line_total) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [orderId, item.productId, item.name, item.qty, item.unitPrice, item.lineTotal]
+    );
+  }
+
+  const order = {
+    id: orderId,
+    userId,
+    items: lineItems,
+    total: Number(total.toFixed(2)),
+    currency: "EUR",
+    status: "created",
+    createdAt: new Date().toISOString()
+  };
+
+  const eventId = "evt_" + nanoid(10);
+  await run(`INSERT INTO events (id, type, order_id, payload) VALUES ($1, $2, $3, $4::jsonb)`, [
+    eventId,
+    "order.created",
+    order.id,
+    JSON.stringify(order)
+  ]);
+
+  return { order, eventId };
+}
+
+// --- Public ---
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "n8n-lab-live", db: "postgres", now: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: "n8n-lab-live",
+    db: "postgres",
+    now: new Date().toISOString(),
+    hosts: { storeHost: STORE_HOST || null, labHost: LAB_HOST || null },
+    webhooks: {
+      order: Boolean(N8N_ORDER_WEBHOOK_URL),
+      lead: Boolean(N8N_LEAD_WEBHOOK_URL),
+      booking: Boolean(N8N_BOOKING_WEBHOOK_URL),
+      signed: Boolean(N8N_WEBHOOK_SECRET)
+    },
+    rateLimit: { publicFormsPerIp: STORE_PUBLIC_RATE_MAX, windowMs: STORE_PUBLIC_RATE_WINDOW_MS }
+  });
 });
 
-app.post("/api/auth/register", async (req, res) => {
+// --- Store (public + customers) ---
+app.get("/api/store/products", (_req, res) => {
+  query(
+    `SELECT id, name, slug, price::float AS price, currency, stock,
+            LEFT(COALESCE(description, ''), 220) AS "summary"
+     FROM products ORDER BY name ASC`
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch products", detail: error.message }));
+});
+
+app.get("/api/store/products/:idOrSlug", (req, res) => {
+  const key = req.params.idOrSlug;
+  query(
+    `
+    SELECT id, name, slug, description, price::float AS price, currency, stock
+    FROM products
+    WHERE id = $1 OR lower(slug) = lower($1)
+    LIMIT 1
+    `,
+    [key]
+  )
+    .then((result) => {
+      if (!result.rowCount) return res.status(404).json({ error: "Product not found" });
+      const row = result.rows[0];
+      res.json({
+        product: {
+          id: row.id,
+          name: row.name,
+          slug: row.slug,
+          description: row.description || "",
+          price: row.price,
+          currency: row.currency,
+          stock: row.stock
+        }
+      });
+    })
+    .catch((error) => res.status(500).json({ error: "Failed to fetch product", detail: error.message }));
+});
+
+app.post("/api/store/auth/register", async (req, res) => {
   const { email, password, name } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
@@ -141,79 +448,143 @@ app.post("/api/auth/register", async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
     const result = await query(
-      `
-      INSERT INTO users (id, email, name, password_hash)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, email, name, created_at
-      `,
-      [nanoid(10), email, name || "User", passwordHash]
+      `INSERT INTO users (id, email, name, password_hash, role) VALUES ($1, $2, $3, $4, 'customer') RETURNING id, email, name, role, created_at`,
+      [nanoid(10), email, name || "Client", passwordHash]
     );
 
-    res.status(201).json(publicUser(result.rows[0]));
+    const user = result.rows[0];
+    const token = signUserToken(user);
+    res.status(201).json({ token, user: publicUser(user) });
   } catch (error) {
     res.status(500).json({ error: "Failed to create user", detail: error.message });
   }
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/store/auth/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
 
   try {
-    const result = await query(
-      `SELECT id, email, name, password_hash, created_at FROM users WHERE lower(email) = lower($1) LIMIT 1`,
-      [email]
-    );
-    if (!result.rowCount) return res.status(401).json({ error: "Invalid credentials" });
+    const user = await loginUserRow(email, password);
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (user.role === "staff") return res.status(403).json({ error: "Staff accounts use /lab/ (POST /api/lab/auth/login)" });
 
-    const user = result.rows[0];
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
-
-    const token = jwt.sign({ sub: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
+    const token = signUserToken(user);
     res.json({ token, user: publicUser(user) });
   } catch (error) {
     res.status(500).json({ error: "Login failed", detail: error.message });
   }
 });
 
-app.get("/api/admin/users", adminGuard, (req, res) => {
-  query(`SELECT id, email, name, created_at FROM users ORDER BY created_at DESC`)
-    .then((result) => res.json({ items: result.rows.map(publicUser) }))
-    .catch((error) => res.status(500).json({ error: "Failed to fetch users", detail: error.message }));
-});
-
-app.post("/api/admin/users", adminGuard, async (req, res) => {
-  const { email, password, name } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
-  if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
+app.post("/api/store/leads", publicFormRateLimit, async (req, res) => {
+  const { email, name, message, productId, source } = req.body || {};
+  if (!email || typeof email !== "string") return res.status(400).json({ error: "email is required" });
 
   try {
-    const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
-    if (existing.rowCount) return res.status(409).json({ error: "User already exists" });
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const result = await query(
-      `
-      INSERT INTO users (id, email, name, password_hash)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, email, name, created_at
-      `,
-      [nanoid(10), email, name || "User", passwordHash]
+    const leadId = "lead_" + nanoid(10);
+    const meta = { ...(req.body?.meta || {}) };
+    await query(
+      `INSERT INTO leads (id, email, name, message, product_id, source, meta) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [leadId, email.trim(), name || null, message || null, productId || null, source || "store", JSON.stringify(meta)]
     );
 
-    res.status(201).json(publicUser(result.rows[0]));
+    const payload = { leadId, email: email.trim(), name: name || null, message: message || null, productId: productId || null, source: source || "store" };
+    await insertEventRow("lead.created", payload);
+    void dispatchN8nWebhook("lead", payload);
+
+    res.status(201).json({ ok: true, leadId });
   } catch (error) {
-    res.status(500).json({ error: "Failed to create user", detail: error.message });
+    res.status(500).json({ error: "Failed to save lead", detail: error.message });
   }
 });
 
-app.get("/api/me", authRequired, (req, res) => {
-  res.json({ user: req.user });
+function parseISODate(d) {
+  if (!d || typeof d !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d.trim());
+  if (!m) return null;
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+app.post("/api/store/bookings", publicFormRateLimit, async (req, res) => {
+  const { email, name, checkIn, checkOut, guests, roomType, notes } = req.body || {};
+  if (!email || typeof email !== "string") return res.status(400).json({ error: "email is required" });
+  if (!checkIn || !checkOut) return res.status(400).json({ error: "checkIn and checkOut (YYYY-MM-DD) are required" });
+
+  const dIn = parseISODate(checkIn);
+  const dOut = parseISODate(checkOut);
+  if (!dIn || !dOut) return res.status(400).json({ error: "Invalid date format (use YYYY-MM-DD)" });
+  if (dOut <= dIn) return res.status(400).json({ error: "checkOut must be after checkIn" });
+  const nights = Math.round((dOut - dIn) / 86400000);
+  if (nights > 30) return res.status(400).json({ error: "Maximum 30 nights for demo" });
+
+  const g = Number(guests) || 1;
+  if (!Number.isInteger(g) || g < 1 || g > 20) return res.status(400).json({ error: "guests must be 1–20" });
+
+  let userId = null;
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (token) {
+    try {
+      const p = jwt.verify(token, JWT_SECRET);
+      if (p.role === "customer") userId = p.sub;
+    } catch (_) {
+      /* optional link */
+    }
+  }
+
+  try {
+    const bookingId = "bkg_" + nanoid(10);
+    const cin = checkIn.trim();
+    const cout = checkOut.trim();
+    await query(
+      `INSERT INTO bookings (id, user_id, email, name, check_in, check_out, guests, room_type, notes, status, meta) VALUES ($1,$2,$3,$4,$5::date,$6::date,$7,$8,$9,'requested',$10::jsonb)`,
+      [
+        bookingId,
+        userId,
+        email.trim(),
+        name || null,
+        cin,
+        cout,
+        g,
+        roomType || null,
+        notes || null,
+        JSON.stringify({ ...(req.body?.meta || {}) })
+      ]
+    );
+
+    const payload = {
+      bookingId,
+      userId,
+      email: email.trim(),
+      name: name || null,
+      checkIn: cin,
+      checkOut: cout,
+      nights,
+      guests: g,
+      roomType: roomType || null,
+      notes: notes || null
+    };
+    await insertEventRow("booking.requested", payload);
+    void dispatchN8nWebhook("booking", payload);
+
+    res.status(201).json({ ok: true, bookingId, nights });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to save booking", detail: error.message });
+  }
 });
 
-app.get("/api/account", authRequired, (req, res) => {
-  query(`SELECT id, email, name, created_at FROM users WHERE id = $1 LIMIT 1`, [req.user.sub])
+app.get("/api/store/bookings/me", verifyToken, requireCustomer, (req, res) => {
+  query(
+    `SELECT id, email, name, check_in AS "checkIn", check_out AS "checkOut", guests, room_type AS "roomType", status, created_at AS "createdAt" FROM bookings WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+    [req.user.sub]
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch bookings", detail: error.message }));
+});
+
+app.get("/api/store/account", verifyToken, requireCustomer, (req, res) => {
+  query(`SELECT id, email, name, role, created_at FROM users WHERE id = $1 LIMIT 1`, [req.user.sub])
     .then((result) => {
       if (!result.rowCount) return res.status(404).json({ error: "User not found in database" });
       res.json({ account: publicUser(result.rows[0]) });
@@ -221,101 +592,28 @@ app.get("/api/account", authRequired, (req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to load account", detail: error.message }));
 });
 
-app.get("/api/products", (_req, res) => {
-  query(`SELECT id, name, price::float AS price, currency, stock FROM products ORDER BY name ASC`)
-    .then((result) => res.json({ items: result.rows }))
-    .catch((error) => res.status(500).json({ error: "Failed to fetch products", detail: error.message }));
-});
-
-app.post("/api/orders", authRequired, (req, res) => {
+app.post("/api/store/orders", verifyToken, requireCustomer, (req, res) => {
   (async () => {
     const { items } = req.body || {};
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: "items[] is required" });
-    }
-
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const lineItems = [];
-      let total = 0;
-
-      for (const line of items) {
-        const productResult = await client.query(
-          `SELECT id, name, price::float AS price FROM products WHERE id = $1 LIMIT 1`,
-          [line.productId]
-        );
-        if (!productResult.rowCount) return res.status(400).json({ error: `Unknown product: ${line.productId}` });
-
-        const product = productResult.rows[0];
-        const qty = Number(line.qty || 1);
-        if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "qty must be >= 1" });
-
-        const lineTotal = Number((qty * Number(product.price)).toFixed(2));
-        lineItems.push({
-          productId: product.id,
-          name: product.name,
-          qty,
-          unitPrice: Number(product.price),
-          lineTotal
-        });
-        total += lineTotal;
-      }
-
-      const orderId = "ord_" + nanoid(8);
-      await client.query(
-        `
-        INSERT INTO orders (id, user_id, total, currency, status)
-        VALUES ($1, $2, $3, 'EUR', 'created')
-        `,
-        [orderId, req.user.sub, Number(total.toFixed(2))]
-      );
-
-      for (const item of lineItems) {
-        await client.query(
-          `
-          INSERT INTO order_items (order_id, product_id, name, qty, unit_price, line_total)
-          VALUES ($1, $2, $3, $4, $5, $6)
-          `,
-          [orderId, item.productId, item.name, item.qty, item.unitPrice, item.lineTotal]
-        );
-      }
-
-      const order = {
-        id: orderId,
-        userId: req.user.sub,
-        items: lineItems,
-        total: Number(total.toFixed(2)),
-        currency: "EUR",
-        status: "created",
-        createdAt: new Date().toISOString()
-      };
-
-      const event = {
-        id: "evt_" + nanoid(10),
-        type: "order.created",
-        orderId: order.id,
-        payload: order,
-        createdAt: new Date().toISOString()
-      };
-
-      await client.query(
-        `INSERT INTO events (id, type, order_id, payload) VALUES ($1, $2, $3, $4::jsonb)`,
-        [event.id, event.type, event.orderId, JSON.stringify(event.payload)]
-      );
-
+      const { order } = await createOrderForUserId(req.user.sub, items, client);
       await client.query("COMMIT");
-      res.status(201).json({ order, event });
+      void dispatchN8nWebhook("order", order);
+      res.status(201).json({ order });
     } catch (error) {
       await client.query("ROLLBACK");
-      res.status(500).json({ error: "Failed to create order", detail: error.message });
+      const msg = error.message || String(error);
+      if (msg.includes("items") || msg.includes("Unknown") || msg.includes("qty")) return res.status(400).json({ error: msg });
+      res.status(500).json({ error: "Failed to create order", detail: msg });
     } finally {
       client.release();
     }
   })();
 });
 
-app.get("/api/orders", authRequired, (req, res) => {
+app.get("/api/store/orders", verifyToken, requireCustomer, (req, res) => {
   query(
     `
     SELECT
@@ -349,38 +647,166 @@ app.get("/api/orders", authRequired, (req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to fetch orders", detail: error.message }));
 });
 
-app.get("/api/events", authRequired, (_req, res) => {
-  query(
-    `
-    SELECT id, type, order_id AS "orderId", payload, created_at AS "createdAt"
-    FROM events
-    ORDER BY created_at DESC
-    LIMIT 50
-    `
-  )
+// --- Lab (staff JWT) ---
+app.post("/api/lab/auth/login", async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+
+  try {
+    const user = await loginUserRow(email, password);
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (user.role !== "staff") return res.status(403).json({ error: "Not a staff account — customers use /store/" });
+
+    const token = signUserToken(user);
+    res.json({ token, user: publicUser(user, { includeRole: true }) });
+  } catch (error) {
+    res.status(500).json({ error: "Login failed", detail: error.message });
+  }
+});
+
+app.get("/api/lab/me", verifyToken, requireStaff, (req, res) => {
+  res.json({ user: req.user });
+});
+
+app.get("/api/lab/account", verifyToken, requireStaff, (req, res) => {
+  query(`SELECT id, email, name, role, created_at FROM users WHERE id = $1 LIMIT 1`, [req.user.sub])
+    .then((result) => {
+      if (!result.rowCount) return res.status(404).json({ error: "User not found in database" });
+      res.json({ account: publicUser(result.rows[0], { includeRole: true }) });
+    })
+    .catch((error) => res.status(500).json({ error: "Failed to load account", detail: error.message }));
+});
+
+app.get("/api/lab/events", verifyToken, requireStaff, (_req, res) => {
+  query(`SELECT id, type, order_id AS "orderId", payload, created_at AS "createdAt" FROM events ORDER BY created_at DESC LIMIT 100`)
     .then((result) => res.json({ items: result.rows }))
     .catch((error) => res.status(500).json({ error: "Failed to fetch events", detail: error.message }));
 });
 
-app.post("/api/events/simulate", authRequired, (req, res) => {
+app.post("/api/lab/events/simulate", verifyToken, requireStaff, (req, res) => {
   const type = req.body?.type || "lead.created";
-  const payload = req.body?.payload || { source: "manual", score: 78 };
-  const event = {
-    id: "evt_" + nanoid(10),
-    type,
-    payload,
-    createdAt: new Date().toISOString()
-  };
-
-  query(
-    `INSERT INTO events (id, type, payload) VALUES ($1, $2, $3::jsonb)`,
-    [event.id, event.type, JSON.stringify(event.payload)]
-  )
-    .then(() => res.status(201).json({ event }))
+  const payload = req.body?.payload || { source: "lab", score: 78 };
+  insertEventRow(type, payload)
+    .then((event) => res.status(201).json({ event }))
     .catch((error) => res.status(500).json({ error: "Failed to simulate event", detail: error.message }));
 });
 
-app.get("/api/n8n/webhook-payload/order-created/:id", authRequired, (req, res) => {
+app.get("/api/lab/orders", verifyToken, requireStaff, (_req, res) => {
+  query(
+    `
+    SELECT
+      o.id,
+      o.user_id AS "userId",
+      u.email AS "userEmail",
+      u.name AS "userName",
+      o.total::float AS total,
+      o.currency,
+      o.status,
+      o.created_at AS "createdAt",
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'productId', oi.product_id,
+            'name', oi.name,
+            'qty', oi.qty,
+            'unitPrice', oi.unit_price::float,
+            'lineTotal', oi.line_total::float
+          )
+        ) FILTER (WHERE oi.id IS NOT NULL),
+        '[]'::json
+      ) AS items
+    FROM orders o
+    LEFT JOIN users u ON u.id = o.user_id
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    GROUP BY o.id, u.id, u.email, u.name
+    ORDER BY o.created_at DESC
+    LIMIT 200
+    `
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch orders", detail: error.message }));
+});
+
+app.post("/api/lab/orders", verifyToken, requireStaff, (req, res) => {
+  (async () => {
+    const { customerUserId, items } = req.body || {};
+    if (!customerUserId) return res.status(400).json({ error: "customerUserId is required" });
+
+    const u = await query(`SELECT id, role FROM users WHERE id = $1 LIMIT 1`, [customerUserId]);
+    if (!u.rowCount) return res.status(404).json({ error: "Customer not found" });
+    if (u.rows[0].role !== "customer") return res.status(400).json({ error: "Target user must be a customer" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { order } = await createOrderForUserId(customerUserId, items, client);
+      await client.query("COMMIT");
+      void dispatchN8nWebhook("order", order);
+      res.status(201).json({ order });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      const msg = error.message || String(error);
+      if (msg.includes("items") || msg.includes("Unknown") || msg.includes("qty")) return res.status(400).json({ error: msg });
+      res.status(500).json({ error: "Failed to create order", detail: msg });
+    } finally {
+      client.release();
+    }
+  })();
+});
+
+app.get("/api/lab/bookings", verifyToken, requireStaff, (_req, res) => {
+  query(
+    `
+    SELECT b.id, b.user_id AS "userId", u.email AS "userEmail", b.email, b.name,
+           b.check_in AS "checkIn", b.check_out AS "checkOut", b.guests, b.room_type AS "roomType",
+           b.status, b.created_at AS "createdAt"
+    FROM bookings b
+    LEFT JOIN users u ON u.id = b.user_id
+    ORDER BY b.created_at DESC
+    LIMIT 200
+    `
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch bookings", detail: error.message }));
+});
+
+app.get("/api/lab/leads", verifyToken, requireStaff, (_req, res) => {
+  query(
+    `SELECT id, email, name, message, product_id AS "productId", source, meta, created_at AS "createdAt" FROM leads ORDER BY created_at DESC LIMIT 200`
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch leads", detail: error.message }));
+});
+
+app.get("/api/lab/admin/users", verifyToken, requireStaff, adminGuard, (_req, res) => {
+  query(`SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC`)
+    .then((result) => res.json({ items: result.rows.map((row) => publicUser(row, { includeRole: true })) }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch users", detail: error.message }));
+});
+
+app.post("/api/lab/admin/users", verifyToken, requireStaff, adminGuard, async (req, res) => {
+  const { email, password, name, role } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+  if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
+  const r = role === "staff" ? "staff" : "customer";
+
+  try {
+    const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
+    if (existing.rowCount) return res.status(409).json({ error: "User already exists" });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `INSERT INTO users (id, email, name, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, created_at`,
+      [nanoid(10), email, name || "User", passwordHash, r]
+    );
+
+    res.status(201).json(publicUser(result.rows[0], { includeRole: true }));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create user", detail: error.message });
+  }
+});
+
+app.get("/api/lab/n8n/webhook-payload/order-created/:id", verifyToken, requireStaff, (req, res) => {
   query(
     `
     SELECT
@@ -421,15 +847,57 @@ app.get("/api/n8n/webhook-payload/order-created/:id", authRequired, (req, res) =
     .catch((error) => res.status(500).json({ error: "Failed to prepare webhook payload", detail: error.message }));
 });
 
-app.use(express.static(path.join(__dirname, "public")));
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+// Legacy shims (same JWT shape; prefer /api/store/* and /api/lab/*)
+app.get("/api/products", (_req, res) => {
+  query(`SELECT id, name, slug, price::float AS price, currency, stock FROM products ORDER BY name ASC`)
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch products", detail: error.message }));
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+  try {
+    const user = await loginUserRow(email, password);
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    const token = signUserToken(user);
+    res.json({
+      token,
+      user: publicUser(user, { includeRole: true }),
+      hint: "Prefer POST /api/store/auth/login (customers) or POST /api/lab/auth/login (staff)."
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Login failed", detail: error.message });
+  }
+});
+
+const publicDir = path.join(__dirname, "public");
+const storeDir = path.join(publicDir, "store");
+const labDir = path.join(publicDir, "lab");
+
+app.get("/", (_req, res) => res.redirect(302, "/store/"));
+
+app.use("/store", express.static(storeDir, { fallthrough: true }));
+app.use("/store", (_req, res) => {
+  res.sendFile(path.join(storeDir, "index.html"));
+});
+
+app.use("/lab", express.static(labDir, { fallthrough: true }));
+app.use("/lab", (_req, res) => {
+  res.sendFile(path.join(labDir, "index.html"));
+});
+
+app.use(express.static(publicDir, { index: false }));
+
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api")) return res.status(404).json({ error: "Not found" });
+  res.redirect(302, "/store/");
 });
 
 initDb()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`n8n-lab-live running on http://localhost:${PORT}`);
+      console.log(`n8n-lab-live on http://localhost:${PORT}  (store: /store/  lab: /lab/)`);
     });
   })
   .catch((error) => {

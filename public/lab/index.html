@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>n8n Lab · Staff</title>
+  <style>
+    :root {
+      --bg: #06131b; --panel: #0d1f2b; --card: #133042; --text: #e7f2fa; --muted: #9fb7c7;
+      --accent: #39b7ff; --accent-2: #2be39b; --border: #1e455d; --danger: #ff7a7a; --ok: #51e6a9; --warn: #ffd67a;
+      --shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+    }
+    body[data-theme="light"] {
+      --bg: #eaf5ff; --panel: #ffffff; --card: #f4f9ff; --text: #19344b; --muted: #4f7088;
+      --accent: #2879ff; --accent-2: #2ca7ff; --border: #c8dff5; --danger: #ce3347; --ok: #0c9263; --warn: #b1790b;
+      --shadow: 0 8px 24px rgba(20, 70, 120, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:Inter,Segoe UI,Roboto,Arial,sans-serif; background:linear-gradient(180deg,var(--bg),color-mix(in srgb,var(--bg),black 8%)); color:var(--text); }
+    .wrap { max-width:1200px; margin:20px auto 42px; padding:0 16px; }
+    .header { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; }
+    .header-left { display:flex; flex-direction:column; gap:4px; }
+    .header-right { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .muted { color:var(--muted); } .tiny { font-size:.86rem; color:var(--muted); }
+
+    .tab-btn { width:auto; padding:7px 12px; border:1px solid var(--border); border-radius:999px; background:var(--card); color:var(--text); cursor:pointer; font-size:.86rem; transition:all .2s ease; }
+    .tab-btn:hover { border-color:var(--accent); transform:translateY(-1px); }
+    .tab-btn.active { background:linear-gradient(90deg,color-mix(in srgb,var(--accent),black 20%),var(--accent-2)); border-color:transparent; color:#fff; box-shadow:var(--shadow); }
+
+    .window { display:none; margin-top:14px; animation:fadeIn .24s ease; }
+    .window.active { display:block; }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:14px; box-shadow:var(--shadow); margin-top:12px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+    .auth-banner { grid-column:1 / -1; margin:0; padding:10px 12px; border-radius:12px; border:1px solid var(--border); background:color-mix(in srgb,var(--card),var(--panel) 35%); color:var(--muted); }
+    .row { display:flex; gap:8px; flex-wrap:wrap; } .row > * { flex:1; min-width:120px; }
+    label { display:block; margin:8px 0 5px; font-size:.89rem; }
+    input,select,textarea,button { width:100%; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--text); padding:9px 10px; font-size:.92rem; transition:border-color .2s ease,box-shadow .2s ease,transform .08s ease,opacity .2s ease; }
+    input:focus,select:focus,textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent),transparent 75%); }
+    textarea { min-height:140px; resize:vertical; font-family:ui-monospace,Consolas,monospace; }
+    .btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .btn-row button,.small-btn { width:auto; min-width:92px; padding:7px 10px; font-size:.84rem; cursor:pointer; }
+    button:hover { border-color:var(--accent); } button:active { transform:translateY(1px) scale(.99); }
+    button[disabled] { opacity:.65; cursor:progress; }
+    .btn-primary { background:color-mix(in srgb,var(--accent),var(--card) 65%); }
+    .btn-success { background:color-mix(in srgb,var(--ok),var(--card) 70%); }
+    .btn-danger { background:color-mix(in srgb,var(--danger),var(--card) 75%); }
+    .status { margin-top:10px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; background:var(--card); }
+    .status.ok { color:var(--ok); } .status.warn { color:var(--warn); } .status.err { color:var(--danger); }
+    .history-item { border:1px solid var(--border); border-radius:10px; padding:8px; margin-bottom:7px; background:var(--card); }
+    .badges { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+    .badge { border:1px solid var(--border); border-radius:999px; font-size:.78rem; padding:4px 8px; background:var(--card); color:var(--muted); }
+    .badge.on { color:var(--ok); border-color:color-mix(in srgb,var(--ok),var(--border) 50%); }
+    .admin-lock { padding:10px; border:1px dashed var(--border); border-radius:10px; color:var(--warn); margin-top:8px; }
+    .toast-wrap { position:fixed; right:14px; top:14px; z-index:999; display:flex; flex-direction:column; gap:8px; }
+    .toast { min-width:220px; max-width:330px; border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--panel); box-shadow:var(--shadow); animation:toastIn .2s ease; }
+    .toast.ok { border-color:color-mix(in srgb,var(--ok),var(--border) 55%); }
+    .toast.err { border-color:color-mix(in srgb,var(--danger),var(--border) 55%); }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes toastIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulseDot { 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:.55; transform:scale(.92);} }
+
+    .table-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:10px; margin-top:8px; }
+    .data-table { width:100%; border-collapse:collapse; font-size:.86rem; }
+    .data-table th { text-align:left; padding:10px 12px; background:color-mix(in srgb,var(--card),var(--panel) 40%); border-bottom:1px solid var(--border); color:var(--muted); font-weight:600; }
+    .data-table td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .data-table tr:last-child td { border-bottom:none; }
+    .data-table tr:hover td { background:color-mix(in srgb,var(--accent),transparent 94%); }
+    .data-table .mono { font-family:ui-monospace,Consolas,monospace; font-size:.8rem; color:var(--muted); }
+    .empty-hint { padding:14px; text-align:center; color:var(--muted); font-size:.88rem; }
+
+    .activity-panel { margin-top:12px; }
+    .activity-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+    .live-dot { width:8px; height:8px; border-radius:50%; background:var(--ok); margin-right:6px; display:inline-block; animation:pulseDot 1.4s ease infinite; }
+    .timeline { position:relative; padding-left:18px; border-left:2px solid var(--border); margin-left:10px; }
+    .timeline-item { position:relative; padding:10px 12px 10px 4px; margin-bottom:8px; border-radius:10px; background:var(--card); border:1px solid var(--border); animation:fadeIn .25s ease; }
+    .timeline-item::before { content:""; position:absolute; left:-23px; top:14px; width:10px; height:10px; border-radius:50%; background:var(--accent); border:2px solid var(--panel); }
+    .timeline-item.type-order { border-left:3px solid var(--accent-2); }
+    .timeline-item.type-lead { border-left:3px solid var(--accent); }
+    .timeline-item.type-booking { border-left:3px solid #c9a227; }
+    .timeline-item.type-other { border-left:3px solid var(--muted); }
+    .ev-type { display:inline-block; font-size:.72rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:3px 8px; border-radius:999px; background:color-mix(in srgb,var(--accent),transparent 88%); color:var(--accent); margin-bottom:4px; }
+    .ev-time { font-size:.78rem; color:var(--muted); }
+    .ev-summary { font-size:.9rem; margin-top:4px; word-break:break-word; }
+  </style>
+</head>
+<body>
+  <div class="toast-wrap" id="toasts"></div>
+  <div class="wrap">
+    <div class="header">
+      <div class="header-left">
+        <h1>n8n Lab · Staff</h1>
+        <p class="muted">Console interna (webhook, evenimente, admin). <a href="/store/" style="color:var(--accent);">Magazin public →</a></p>
+        <div class="badges">
+          <span id="badgeApi" class="badge">API disconnected</span>
+          <span id="badgeAuth" class="badge">Not logged in</span>
+          <span id="badgeAdmin" class="badge">Admin key missing</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="tab-btn active" data-tab="app">App</button>
+        <button type="button" class="tab-btn" id="tabAuthBtn" data-tab="auth">Staff</button>
+        <button class="tab-btn" data-tab="admin">Admin</button>
+        <select id="themeSelect" class="small-btn" style="width:auto;">
+          <option value="dark">Theme: Dark</option>
+          <option value="light">Theme: Light</option>
+        </select>
+      </div>
+    </div>
+
+    <section class="window active" data-window="app">
+      <div class="grid">
+        <div class="panel">
+          <h2>E-commerce · teste staff</h2>
+          <p class="tiny">Produse publice din <code>/api/store/products</code>. Comanda de test se pune pe un <strong>client</strong> (ID din lista useri).</p>
+          <div class="row" style="margin-bottom:8px;">
+            <div style="flex:2;min-width:180px;"><label for="labCustomerId">Customer user id</label><input id="labCustomerId" placeholder="id din Refresh users" class="mono" /></div>
+          </div>
+          <div class="btn-row">
+            <button id="btnProducts" class="btn-primary">Load products</button>
+            <button id="btnCreateOrder" class="btn-success">Create order (lab)</button>
+            <button id="btnSimEvent" class="btn-primary">Simulate lead</button>
+          </div>
+          <textarea id="apiOutput" readonly style="margin-top:8px;"></textarea>
+        </div>
+        <div class="panel">
+          <h2>Webhook Lab</h2>
+          <label for="webhookUrl">Webhook URL</label>
+          <input id="webhookUrl" placeholder="https://your-n8n/webhook-test/..." />
+          <div class="row">
+            <div><label for="method">Method</label><select id="method"><option>POST</option><option>PUT</option><option>PATCH</option><option>GET</option></select></div>
+            <div><label for="contentType">Content-Type</label><select id="contentType"><option>application/json</option><option>text/plain</option></select></div>
+          </div>
+          <label for="template">Payload template</label>
+          <select id="template"><option value="lead">Lead</option><option value="order">Order</option><option value="ragQuery">RAG query</option><option value="custom">Custom</option></select>
+          <label for="payload">Payload</label>
+          <textarea id="payload"></textarea>
+          <div class="btn-row">
+            <button id="btnFormat" class="btn-primary">Format JSON</button>
+            <button id="btnCurl" class="btn-primary">Generate curl</button>
+            <button id="btnSend" class="btn-success">Send</button>
+          </div>
+          <div id="status" class="status">Ready.</div>
+        </div>
+      </div>
+      <div class="panel activity-panel">
+        <div class="activity-head">
+          <h2 style="margin:0;">Activity timeline</h2>
+          <div class="btn-row" style="margin:0;">
+            <button id="btnRefreshActivity" class="btn-primary">Refresh feed</button>
+            <label class="tiny" style="display:flex;align-items:center;gap:6px;width:auto;margin:0;">
+              <input id="activityLive" type="checkbox" style="width:auto;" /> Live (5s)
+            </label>
+          </div>
+        </div>
+        <p class="tiny" id="activityHint">Evenimente din DB (order.created, lead.created, etc.). Necesita login.</p>
+        <div id="activityTimeline" class="timeline"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Saved endpoints + history</h2>
+        <div class="row">
+          <select id="savedList" size="5" style="min-height:118px;"></select>
+          <textarea id="curlCmd" readonly></textarea>
+        </div>
+        <div class="btn-row">
+          <button id="btnSave">Save endpoint</button>
+          <button id="btnLoad">Load</button>
+          <button id="btnDelete">Delete</button>
+          <button id="btnClear">Clear history</button>
+        </div>
+        <div id="history" style="margin-top:8px;"></div>
+      </div>
+    </section>
+
+    <section class="window" data-window="auth">
+      <div class="grid" id="authGrid">
+        <p class="tiny auth-banner">Acces <strong>staff</strong> (role în DB = <code>staff</code>). Conturile de magazin se creează doar în <a href="/store/">/store/</a>.</p>
+        <div class="panel" id="loginPanel">
+          <h2 id="loginPanelTitle">Staff login</h2>
+          <p id="loginPanelHint" class="tiny">Foloseste contul creat din env <code>LAB_STAFF_EMAIL</code> / <code>LAB_STAFF_PASSWORD</code> la primul deploy.</p>
+          <div id="loginCredentials">
+            <label>Email</label><input id="loginEmail" placeholder="staff@yourcompany.com" />
+            <label>Password</label><input id="loginPassword" type="password" placeholder="password" />
+            <div class="btn-row"><button id="btnLogin" class="btn-primary">Login staff</button></div>
+          </div>
+          <div id="loggedInBar" class="btn-row" style="display:none;"><button id="btnLogout" class="btn-danger">Logout</button></div>
+          <div id="authState" class="status">Not logged in.</div>
+          <div id="myAccountPanel" class="panel" style="margin-top:12px; padding:12px; display:none; border:1px solid var(--border); border-radius:12px; background:var(--card);">
+            <h3 style="margin:0 0 8px;">Cont staff în Postgres</h3>
+            <p class="tiny" style="margin:0 0 8px;">Rol staff, fără cheie admin.</p>
+            <table class="data-table" style="margin:0;">
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>ID</th><th>Created</th></tr></thead>
+              <tbody id="myAccountBody"></tbody>
+            </table>
+            <p id="myAccountError" class="tiny" style="color:var(--danger); margin-top:8px; display:none;"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="window" data-window="admin">
+      <div class="panel">
+        <h2>Admin + Settings</h2>
+        <label for="apiBase">API Base URL</label>
+        <input id="apiBase" placeholder="https://n8n-lab-live-xxx.onrender.com" />
+        <div class="btn-row">
+          <button id="btnSaveSettings" class="btn-primary">Save settings</button>
+          <button id="btnPing" class="btn-success">Test API health</button>
+        </div>
+        <label for="adminKey">Admin Key (obligatoriu pe Render daca ai setat <code>ADMIN_KEY</code>)</label>
+        <input id="adminKey" placeholder="Lipeste exact valoarea din Render → Environment" />
+        <p class="tiny">Lista useri magazin: <code>GET /api/lab/admin/users</code> — fără <code>ADMIN_KEY</code> pe server merge fără header; pe Render pune aceeași valoare ca în env.</p>
+        <div id="settingsStatus" class="status">Settings not tested yet.</div>
+      </div>
+      <div id="adminLock" class="admin-lock">Admin e blocat pana faci <strong>Staff login</strong>.</div>
+      <div id="adminContent" class="grid" style="display:none;">
+        <div class="panel">
+          <h2>Creează client (test magazin)</h2>
+          <div class="row">
+            <div><label for="localName">Name</label><input id="localName" /></div>
+            <div><label for="localEmail">Email</label><input id="localEmail" /></div>
+            <div><label for="localPassword">Password</label><input id="localPassword" type="password" /></div>
+          </div>
+          <div class="btn-row">
+            <button id="btnLocalCreate" class="btn-success">Create local user</button>
+            <button id="btnLoadUsers" class="btn-primary">Refresh users</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>User list</h2>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Name</th><th>Email</th><th>Role</th><th>ID</th><th>Created</th></tr>
+              </thead>
+              <tbody id="usersTableBody"></tbody>
+            </table>
+          </div>
+          <p id="usersEmpty" class="empty-hint" style="display:none;">No users yet. Create one or refresh.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const templates = { lead: { fullName: "John Demo", email: "john@example.com", budget: 300 }, order: { event: "order.created", orderId: "ORD-1001", amount: 249.99 }, ragQuery: { question: "Cum anulez abonamentul?" } };
+    const el = {
+      body: document.body, toasts: document.getElementById("toasts"), themeSelect: document.getElementById("themeSelect"),
+      tabs: [...document.querySelectorAll(".tab-btn")], tabAuthBtn: document.getElementById("tabAuthBtn"), windows: [...document.querySelectorAll(".window")],
+      badgeApi: document.getElementById("badgeApi"), badgeAuth: document.getElementById("badgeAuth"), badgeAdmin: document.getElementById("badgeAdmin"),
+      apiBase: document.getElementById("apiBase"), btnSaveSettings: document.getElementById("btnSaveSettings"), btnPing: document.getElementById("btnPing"), settingsStatus: document.getElementById("settingsStatus"),
+      loginPanel: document.getElementById("loginPanel"), loginPanelTitle: document.getElementById("loginPanelTitle"), loginPanelHint: document.getElementById("loginPanelHint"), loginCredentials: document.getElementById("loginCredentials"), loggedInBar: document.getElementById("loggedInBar"),
+      loginEmail: document.getElementById("loginEmail"), loginPassword: document.getElementById("loginPassword"),
+      btnLogin: document.getElementById("btnLogin"), btnLogout: document.getElementById("btnLogout"), authState: document.getElementById("authState"),
+      labCustomerId: document.getElementById("labCustomerId"),
+      adminKey: document.getElementById("adminKey"), adminLock: document.getElementById("adminLock"), adminContent: document.getElementById("adminContent"),
+      myAccountPanel: document.getElementById("myAccountPanel"), myAccountBody: document.getElementById("myAccountBody"), myAccountError: document.getElementById("myAccountError"),
+      localName: document.getElementById("localName"), localEmail: document.getElementById("localEmail"), localPassword: document.getElementById("localPassword"), btnLocalCreate: document.getElementById("btnLocalCreate"), btnLoadUsers: document.getElementById("btnLoadUsers"),
+      usersTableBody: document.getElementById("usersTableBody"), usersEmpty: document.getElementById("usersEmpty"),
+      btnRefreshActivity: document.getElementById("btnRefreshActivity"), activityLive: document.getElementById("activityLive"), activityTimeline: document.getElementById("activityTimeline"), activityHint: document.getElementById("activityHint"),
+      btnProducts: document.getElementById("btnProducts"), btnCreateOrder: document.getElementById("btnCreateOrder"), btnSimEvent: document.getElementById("btnSimEvent"), apiOutput: document.getElementById("apiOutput"),
+      url: document.getElementById("webhookUrl"), method: document.getElementById("method"), type: document.getElementById("contentType"), template: document.getElementById("template"), payload: document.getElementById("payload"),
+      btnFormat: document.getElementById("btnFormat"), btnCurl: document.getElementById("btnCurl"), btnSend: document.getElementById("btnSend"), status: document.getElementById("status"),
+      savedList: document.getElementById("savedList"), btnSave: document.getElementById("btnSave"), btnLoad: document.getElementById("btnLoad"), btnDelete: document.getElementById("btnDelete"), btnClear: document.getElementById("btnClear"), curl: document.getElementById("curlCmd"), history: document.getElementById("history")
+    };
+    const state = { history: JSON.parse(localStorage.getItem("n8n_lab_history") || "[]"), endpoints: JSON.parse(localStorage.getItem("n8n_lab_endpoints") || "[]"), theme: localStorage.getItem("n8n_lab_theme") || "dark", apiBase: localStorage.getItem("n8n_lab_api_base") || window.location.origin, token: localStorage.getItem("n8n_lab_token") || "", user: JSON.parse(localStorage.getItem("n8n_lab_user") || "null"), activityPollId: null };
+    const normalizeApiBase = (v) => String(v || "").trim().replace(/\/+$/, "");
+    const authHeaders = (h = {}) => { if (state.token) h.Authorization = `Bearer ${state.token}`; if (el.adminKey.value.trim()) h["x-admin-key"] = el.adminKey.value.trim(); return h; };
+    const saveState = () => { localStorage.setItem("n8n_lab_history", JSON.stringify(state.history.slice(-20))); localStorage.setItem("n8n_lab_endpoints", JSON.stringify(state.endpoints)); localStorage.setItem("n8n_lab_theme", state.theme); localStorage.setItem("n8n_lab_api_base", state.apiBase); localStorage.setItem("n8n_lab_token", state.token || ""); localStorage.setItem("n8n_lab_user", JSON.stringify(state.user || null)); };
+    const saveAdminKey = () => { localStorage.setItem("n8n_lab_admin_key", el.adminKey.value); refreshBadges(); };
+    const setStatus = (m, k = "") => { el.status.className = "status " + k; el.status.textContent = m; };
+    const setSettingsStatus = (m, k = "") => { el.settingsStatus.className = "status " + k; el.settingsStatus.textContent = m; };
+    function toast(message, kind = "ok") { const t = document.createElement("div"); t.className = `toast ${kind}`; t.textContent = message; el.toasts.appendChild(t); setTimeout(() => t.remove(), 2800); }
+    function setLoading(button, loadingText, promiseFactory) { const old = button.textContent; button.disabled = true; button.textContent = loadingText; return promiseFactory().finally(() => { button.disabled = false; button.textContent = old; }); }
+    function refreshAuthState() {
+      const logged = Boolean(state.user);
+      el.authState.className = "status " + (logged ? "ok" : "warn");
+      el.authState.textContent = logged ? `Staff: ${state.user.email}` : "Nu esti conectat ca staff.";
+      el.loginCredentials.style.display = logged ? "none" : "";
+      el.loggedInBar.style.display = logged ? "flex" : "none";
+      el.loginPanelTitle.textContent = logged ? "Sesiune staff" : "Staff login";
+      el.loginPanelHint.textContent = logged
+        ? "Logout pentru a schimba contul staff."
+        : "Cont creat automat din variabilele de mediu LAB_STAFF_* (vezi README).";
+      if (el.tabAuthBtn) el.tabAuthBtn.textContent = logged ? "Staff ✓" : "Staff";
+      void refreshMyAccount();
+    }
+    function refreshBadges() {
+      const apiReady = Boolean(normalizeApiBase(state.apiBase));
+      el.badgeApi.textContent = apiReady ? "API configured" : "API disconnected"; el.badgeApi.classList.toggle("on", apiReady);
+      const authReady = Boolean(state.user); el.badgeAuth.textContent = authReady ? `Logged: ${state.user.email}` : "Not logged in"; el.badgeAuth.classList.toggle("on", authReady);
+      const adminReady = Boolean(el.adminKey.value.trim()); el.badgeAdmin.textContent = adminReady ? "Admin key set" : "Admin key missing"; el.badgeAdmin.classList.toggle("on", adminReady);
+      el.adminContent.style.display = authReady ? "grid" : "none"; el.adminLock.style.display = authReady ? "none" : "block";
+    }
+    function fillTemplate(name) { if (templates[name]) el.payload.value = JSON.stringify(templates[name], null, 2); updateCurl(); }
+    function updateCurl() { const p = (el.payload.value.trim() || "{}").replace(/'/g, "'\"'\"'"); el.curl.value = `curl -X ${el.method.value} "${el.url.value.trim()}" -H "Content-Type: ${el.type.value}" -d '${p}'`; }
+    function refreshSavedList() { el.savedList.innerHTML = ""; state.endpoints.forEach((x, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = x; el.savedList.appendChild(o); }); }
+    function refreshHistory() { el.history.innerHTML = state.history.slice().reverse().map((x) => `<div class="history-item"><strong>${x.method}</strong> ${x.url}<div class="tiny">${x.httpStatus} - ${x.time}</div></div>`).join("") || '<p class="tiny">No history.</p>'; }
+    async function apiCall(path, options = {}) { const base = normalizeApiBase(state.apiBase || el.apiBase.value || window.location.origin); const r = await fetch(`${base}${path}`, options); const t = await r.text(); let d = t; try { d = JSON.parse(t); } catch (_) {} if (!r.ok) throw new Error((d && d.error) || t || `HTTP ${r.status}`); return d; }
+    const renderApiOutput = (v) => { el.apiOutput.value = typeof v === "string" ? v : JSON.stringify(v, null, 2); };
+
+    function formatWhen(iso) {
+      if (!iso) return "—";
+      try { const d = new Date(iso); return isNaN(d) ? String(iso) : d.toLocaleString(); } catch (_) { return String(iso); }
+    }
+
+    async function refreshMyAccount() {
+      el.myAccountError.style.display = "none";
+      el.myAccountError.textContent = "";
+      if (!state.token) {
+        el.myAccountPanel.style.display = "none";
+        el.myAccountBody.innerHTML = "";
+        return;
+      }
+      el.myAccountPanel.style.display = "block";
+      try {
+        const d = await apiCall("/api/lab/account", { headers: { Authorization: `Bearer ${state.token}` } });
+        const u = d.account;
+        el.myAccountBody.innerHTML = "";
+        const tr = document.createElement("tr");
+        ["name", "email", "role", "id", "createdAt"].forEach((k) => {
+          const td = document.createElement("td");
+          if (k === "id") td.className = "mono";
+          td.textContent = k === "createdAt" ? formatWhen(u[k]) : (u[k] || "—");
+          tr.appendChild(td);
+        });
+        el.myAccountBody.appendChild(tr);
+      } catch (e) {
+        el.myAccountError.textContent = e.message || "Nu s-a putut incarca contul.";
+        el.myAccountError.style.display = "block";
+      }
+    }
+
+    async function loadUsersList() {
+      try {
+        el.usersEmpty.innerHTML = "";
+        el.usersEmpty.textContent = "No users yet. Create one or refresh.";
+        const d = await apiCall("/api/lab/admin/users", { headers: authHeaders() });
+        renderUsersTable(d);
+        setSettingsStatus(`Lista incarcata: ${(d.items || []).length} user(i).`, "ok");
+      } catch (e) {
+        const msg = String(e.message || "");
+        renderUsersTable({ items: [] });
+        el.usersEmpty.style.display = "block";
+        if (msg.includes("403") || msg.toLowerCase().includes("admin") || msg.toLowerCase().includes("invalid")) {
+          el.usersEmpty.innerHTML = "Lista e blocata: lipseste sau e gresit <strong>Admin Key</strong> (<code>ADMIN_KEY</code> din Render). Completeaza in Admin → Save → <strong>Refresh users</strong>.";
+        } else {
+          el.usersEmpty.textContent = msg || "Load failed";
+        }
+        setSettingsStatus(msg, "err");
+        throw e;
+      }
+    }
+
+    function renderUsersTable(data) {
+      el.usersTableBody.innerHTML = "";
+      const items = (data && data.items) ? data.items : [];
+      el.usersEmpty.style.display = items.length ? "none" : "block";
+      items.forEach((u) => {
+        const tr = document.createElement("tr");
+        const tdName = document.createElement("td"); tdName.textContent = u.name || "—";
+        const tdEmail = document.createElement("td"); tdEmail.textContent = u.email || "—";
+        const tdRole = document.createElement("td"); tdRole.textContent = u.role || "—";
+        const tdId = document.createElement("td"); tdId.className = "mono"; tdId.textContent = u.id || "—";
+        const tdCreated = document.createElement("td"); tdCreated.textContent = formatWhen(u.createdAt);
+        tr.appendChild(tdName); tr.appendChild(tdEmail); tr.appendChild(tdRole); tr.appendChild(tdId); tr.appendChild(tdCreated);
+        el.usersTableBody.appendChild(tr);
+      });
+    }
+
+    function eventSummary(ev) {
+      const p = ev.payload || {};
+      if (ev.type === "order.created") {
+        const oid = ev.orderId || p.id || (p.order && p.order.id) || "—";
+        const total = p.total != null ? p.total : "";
+        const cur = p.currency || "EUR";
+        return `Order ${oid}${total !== "" ? ` · ${total} ${cur}` : ""}`;
+      }
+      if (ev.type === "lead.created") {
+        const em = p.email || p.customerEmail || "";
+        const nm = p.fullName || p.name || "";
+        return [nm, em].filter(Boolean).join(" · ") || JSON.stringify(p).slice(0, 120);
+      }
+      if (ev.type === "booking.requested") {
+        const em = p.email || "";
+        const nights = p.nights != null ? `${p.nights} nopți` : "";
+        return [p.checkIn, p.checkOut, em, nights].filter(Boolean).join(" · ") || "Booking";
+      }
+      return JSON.stringify(p).slice(0, 140) + (JSON.stringify(p).length > 140 ? "…" : "");
+    }
+
+    function timelineItemClass(type) {
+      if (type === "order.created") return "timeline-item type-order";
+      if (type === "lead.created") return "timeline-item type-lead";
+      if (type === "booking.requested") return "timeline-item type-booking";
+      return "timeline-item type-other";
+    }
+
+    function renderActivityTimeline(items) {
+      el.activityTimeline.innerHTML = "";
+      if (!items || !items.length) {
+        el.activityTimeline.innerHTML = '<p class="empty-hint">Niciun eveniment. Comandă, lead simulat sau rezervare din magazin.</p>';
+        return;
+      }
+      items.forEach((ev) => {
+        const div = document.createElement("div");
+        div.className = timelineItemClass(ev.type);
+        const badge = document.createElement("div");
+        badge.className = "ev-type";
+        badge.textContent = ev.type || "event";
+        const time = document.createElement("div");
+        time.className = "ev-time";
+        time.textContent = formatWhen(ev.createdAt);
+        const sum = document.createElement("div");
+        sum.className = "ev-summary";
+        sum.textContent = eventSummary(ev);
+        div.appendChild(badge); div.appendChild(time); div.appendChild(sum);
+        el.activityTimeline.appendChild(div);
+      });
+    }
+
+    async function fetchActivityFeed() {
+      if (!state.token) {
+        el.activityHint.innerHTML = 'Conecteaza-te ca <strong>staff</strong> (tab Staff) pentru feed live.';
+        renderActivityTimeline([]);
+        return;
+      }
+      el.activityHint.innerHTML = el.activityLive.checked
+        ? '<span class="live-dot"></span>Live: refresh la 5 secunde.'
+        : "Refresh manual sau automat dupa Create order / Simulate lead.";
+      try {
+        const d = await apiCall("/api/lab/events", { headers: authHeaders() });
+        renderActivityTimeline(d.items || []);
+      } catch (e) {
+        el.activityTimeline.innerHTML = `<p class="empty-hint">${e.message}</p>`;
+      }
+    }
+
+    function stopActivityPoll() {
+      if (state.activityPollId) { clearInterval(state.activityPollId); state.activityPollId = null; }
+    }
+
+    function startActivityPollIfNeeded() {
+      stopActivityPoll();
+      if (!el.activityLive.checked || !state.token) return;
+      state.activityPollId = setInterval(() => { fetchActivityFeed(); }, 5000);
+    }
+
+    el.tabs.forEach((btn) => btn.addEventListener("click", () => {
+      el.tabs.forEach((x) => x.classList.remove("active"));
+      btn.classList.add("active");
+      el.windows.forEach((w) => w.classList.remove("active"));
+      document.querySelector(`[data-window="${btn.dataset.tab}"]`).classList.add("active");
+      if (btn.dataset.tab === "app") fetchActivityFeed();
+      if (btn.dataset.tab === "admin" && state.user) loadUsersList().catch(() => {});
+    }));
+    el.themeSelect.addEventListener("change", () => { state.theme = el.themeSelect.value === "light" ? "light" : "dark"; el.body.dataset.theme = state.theme; saveState(); toast("Theme updated"); });
+    el.adminKey.addEventListener("input", () => { refreshBadges(); saveAdminKey(); });
+
+    el.btnSaveSettings.addEventListener("click", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); saveAdminKey(); setSettingsStatus("Settings saved.", "ok"); refreshBadges(); toast("Settings saved"); });
+    el.btnPing.addEventListener("click", () => setLoading(el.btnPing, "Testing...", async () => { try { state.apiBase = normalizeApiBase(el.apiBase.value); const d = await apiCall("/api/health"); setSettingsStatus(`Health OK (${d.db})`, "ok"); toast("API is healthy", "ok"); refreshBadges(); } catch (e) { setSettingsStatus(e.message, "err"); toast("API test failed", "err"); } }));
+
+    el.btnLogin.addEventListener("click", () => setLoading(el.btnLogin, "Login...", async () => {
+      try {
+        const d = await apiCall("/api/lab/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: el.loginEmail.value.trim(), password: el.loginPassword.value }) });
+        state.token = d.token; state.user = d.user; saveState(); refreshAuthState(); refreshBadges(); setStatus("Login successful.", "ok"); toast("Logged in");
+        await refreshMyAccount();
+        await fetchActivityFeed();
+        startActivityPollIfNeeded();
+      } catch (e) { setStatus(e.message, "err"); toast("Login failed", "err"); }
+    }));
+
+    el.btnLogout.addEventListener("click", () => {
+      stopActivityPoll();
+      el.activityLive.checked = false;
+      state.token = ""; state.user = null; saveState(); refreshAuthState(); refreshBadges(); setStatus("Logged out.", "warn"); toast("Logged out");
+      fetchActivityFeed();
+    });
+    el.btnLoadUsers.addEventListener("click", () => setLoading(el.btnLoadUsers, "Loading...", async () => {
+      try {
+        await loadUsersList();
+        toast("Users refreshed");
+      } catch (e) {
+        toast("Users load failed", "err");
+      }
+    }));
+    el.btnLocalCreate.addEventListener("click", () => setLoading(el.btnLocalCreate, "Creating...", async () => {
+      try {
+        await apiCall("/api/lab/admin/users", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: el.localName.value.trim(), email: el.localEmail.value.trim(), password: el.localPassword.value, role: "customer" }) });
+        await loadUsersList();
+        toast("Local user created");
+      } catch (e) {
+        toast("Create local user failed", "err");
+      }
+    }));
+    el.btnRefreshActivity.addEventListener("click", () => setLoading(el.btnRefreshActivity, "Loading...", async () => { await fetchActivityFeed(); toast("Activity refreshed"); }));
+    el.activityLive.addEventListener("change", () => { startActivityPollIfNeeded(); fetchActivityFeed(); });
+
+    el.btnProducts.addEventListener("click", () => setLoading(el.btnProducts, "Loading...", async () => { try { renderApiOutput(await apiCall("/api/store/products")); toast("Products loaded"); } catch (e) { renderApiOutput(e.message); toast("Products failed", "err"); } }));
+    el.btnCreateOrder.addEventListener("click", () => setLoading(el.btnCreateOrder, "Creating...", async () => {
+      try {
+        const cid = el.labCustomerId.value.trim();
+        if (!cid) throw new Error("Completeaza Customer user id (din lista useri).");
+        renderApiOutput(await apiCall("/api/lab/orders", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ customerUserId: cid, items: [{ productId: "prod_1", qty: 1 }] }) }));
+        toast("Order created");
+        await fetchActivityFeed();
+      } catch (e) { renderApiOutput(e.message); toast("Order failed", "err"); }
+    }));
+    el.btnSimEvent.addEventListener("click", () => setLoading(el.btnSimEvent, "Sending...", async () => {
+      try {
+        renderApiOutput(await apiCall("/api/lab/events/simulate", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ type: "lead.created", payload: { email: "lead@example.com", score: 80 } }) }));
+        toast("Lead simulated");
+        await fetchActivityFeed();
+      } catch (e) { renderApiOutput(e.message); toast("Lead simulation failed", "err"); }
+    }));
+
+    el.template.addEventListener("change", () => { if (el.template.value !== "custom") fillTemplate(el.template.value); });
+    [el.url, el.method, el.type, el.payload].forEach((n) => { n.addEventListener("input", updateCurl); n.addEventListener("change", updateCurl); });
+    el.btnFormat.addEventListener("click", () => { try { el.payload.value = JSON.stringify(JSON.parse(el.payload.value || "{}"), null, 2); setStatus("JSON formatted.", "ok"); toast("JSON formatted"); } catch (_) { setStatus("Invalid JSON.", "err"); toast("Invalid JSON", "err"); } updateCurl(); });
+    el.btnCurl.addEventListener("click", () => { updateCurl(); setStatus("curl generated.", "ok"); toast("curl generated"); });
+    el.btnSend.addEventListener("click", () => setLoading(el.btnSend, "Sending...", async () => { try { const body = el.method.value === "GET" ? undefined : (el.type.value === "application/json" ? JSON.stringify(JSON.parse(el.payload.value || "{}")) : el.payload.value); const res = await fetch(el.url.value.trim(), { method: el.method.value, headers: { "Content-Type": el.type.value }, body }); const text = await res.text(); state.history.push({ url: el.url.value.trim(), method: el.method.value, time: new Date().toLocaleString(), httpStatus: res.status, response: text }); saveState(); refreshHistory(); setStatus(`HTTP ${res.status}`, "ok"); toast(`Webhook HTTP ${res.status}`); } catch (e) { setStatus(e.message, "err"); toast("Webhook failed", "err"); } }));
+    el.btnSave.addEventListener("click", () => { const u = el.url.value.trim(); if (!u) return; if (!state.endpoints.includes(u)) state.endpoints.push(u); saveState(); refreshSavedList(); toast("Endpoint saved"); });
+    el.btnLoad.addEventListener("click", () => { const i = Number(el.savedList.value); if (!Number.isNaN(i)) el.url.value = state.endpoints[i] || ""; updateCurl(); });
+    el.btnDelete.addEventListener("click", () => { const i = Number(el.savedList.value); if (Number.isNaN(i)) return; state.endpoints.splice(i, 1); saveState(); refreshSavedList(); toast("Endpoint deleted"); });
+    el.btnClear.addEventListener("click", () => { state.history = []; saveState(); refreshHistory(); toast("History cleared"); });
+
+    el.body.dataset.theme = state.theme; el.themeSelect.value = state.theme; el.apiBase.value = state.apiBase;
+    el.adminKey.value = localStorage.getItem("n8n_lab_admin_key") || "";
+    refreshAuthState(); refreshBadges(); fillTemplate("lead"); refreshSavedList(); refreshHistory(); updateCurl();
+    renderUsersTable({ items: [] });
+    fetchActivityFeed();
+    startActivityPollIfNeeded();
+  </script>
+</body>
+</html>
