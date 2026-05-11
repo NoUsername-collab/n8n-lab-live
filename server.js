@@ -276,6 +276,20 @@ function verifyToken(req, res, next) {
   }
 }
 
+/** Rolul din JWT poate lipsi (token vechi) sau fi învechit; pentru autorizare folosim mereu Postgres. */
+async function hydrateUserRole(req, res, next) {
+  try {
+    const id = req.user && req.user.sub;
+    if (!id) return res.status(401).json({ error: "Missing token subject" });
+    const r = await query(`SELECT role FROM users WHERE id = $1 LIMIT 1`, [id]);
+    if (!r.rowCount) return res.status(401).json({ error: "User not found" });
+    req.user.role = r.rows[0].role;
+    next();
+  } catch (e) {
+    res.status(500).json({ error: "Failed to resolve user role", detail: e.message });
+  }
+}
+
 function requireStaff(req, res, next) {
   if (req.user.role !== "staff") return res.status(403).json({ error: "Staff access required" });
   next();
@@ -574,7 +588,7 @@ app.post("/api/store/bookings", publicFormRateLimit, async (req, res) => {
   }
 });
 
-app.get("/api/store/bookings/me", verifyToken, requireCustomer, (req, res) => {
+app.get("/api/store/bookings/me", verifyToken, hydrateUserRole, requireCustomer, (req, res) => {
   query(
     `SELECT id, email, name, check_in AS "checkIn", check_out AS "checkOut", guests, room_type AS "roomType", status, created_at AS "createdAt" FROM bookings WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
     [req.user.sub]
@@ -583,7 +597,7 @@ app.get("/api/store/bookings/me", verifyToken, requireCustomer, (req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to fetch bookings", detail: error.message }));
 });
 
-app.get("/api/store/account", verifyToken, requireCustomer, (req, res) => {
+app.get("/api/store/account", verifyToken, hydrateUserRole, requireCustomer, (req, res) => {
   query(`SELECT id, email, name, role, created_at FROM users WHERE id = $1 LIMIT 1`, [req.user.sub])
     .then((result) => {
       if (!result.rowCount) return res.status(404).json({ error: "User not found in database" });
@@ -592,7 +606,7 @@ app.get("/api/store/account", verifyToken, requireCustomer, (req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to load account", detail: error.message }));
 });
 
-app.post("/api/store/orders", verifyToken, requireCustomer, (req, res) => {
+app.post("/api/store/orders", verifyToken, hydrateUserRole, requireCustomer, (req, res) => {
   (async () => {
     const { items } = req.body || {};
     const client = await pool.connect();
@@ -613,7 +627,7 @@ app.post("/api/store/orders", verifyToken, requireCustomer, (req, res) => {
   })();
 });
 
-app.get("/api/store/orders", verifyToken, requireCustomer, (req, res) => {
+app.get("/api/store/orders", verifyToken, hydrateUserRole, requireCustomer, (req, res) => {
   query(
     `
     SELECT
@@ -664,11 +678,11 @@ app.post("/api/lab/auth/login", async (req, res) => {
   }
 });
 
-app.get("/api/lab/me", verifyToken, requireStaff, (req, res) => {
+app.get("/api/lab/me", verifyToken, hydrateUserRole, requireStaff, (req, res) => {
   res.json({ user: req.user });
 });
 
-app.get("/api/lab/account", verifyToken, requireStaff, (req, res) => {
+app.get("/api/lab/account", verifyToken, hydrateUserRole, requireStaff, (req, res) => {
   query(`SELECT id, email, name, role, created_at FROM users WHERE id = $1 LIMIT 1`, [req.user.sub])
     .then((result) => {
       if (!result.rowCount) return res.status(404).json({ error: "User not found in database" });
@@ -677,13 +691,13 @@ app.get("/api/lab/account", verifyToken, requireStaff, (req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to load account", detail: error.message }));
 });
 
-app.get("/api/lab/events", verifyToken, requireStaff, (_req, res) => {
+app.get("/api/lab/events", verifyToken, hydrateUserRole, requireStaff, (_req, res) => {
   query(`SELECT id, type, order_id AS "orderId", payload, created_at AS "createdAt" FROM events ORDER BY created_at DESC LIMIT 100`)
     .then((result) => res.json({ items: result.rows }))
     .catch((error) => res.status(500).json({ error: "Failed to fetch events", detail: error.message }));
 });
 
-app.post("/api/lab/events/simulate", verifyToken, requireStaff, (req, res) => {
+app.post("/api/lab/events/simulate", verifyToken, hydrateUserRole, requireStaff, (req, res) => {
   const type = req.body?.type || "lead.created";
   const payload = req.body?.payload || { source: "lab", score: 78 };
   insertEventRow(type, payload)
@@ -691,7 +705,7 @@ app.post("/api/lab/events/simulate", verifyToken, requireStaff, (req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to simulate event", detail: error.message }));
 });
 
-app.get("/api/lab/orders", verifyToken, requireStaff, (_req, res) => {
+app.get("/api/lab/orders", verifyToken, hydrateUserRole, requireStaff, (_req, res) => {
   query(
     `
     SELECT
@@ -727,7 +741,7 @@ app.get("/api/lab/orders", verifyToken, requireStaff, (_req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to fetch orders", detail: error.message }));
 });
 
-app.post("/api/lab/orders", verifyToken, requireStaff, (req, res) => {
+app.post("/api/lab/orders", verifyToken, hydrateUserRole, requireStaff, (req, res) => {
   (async () => {
     const { customerUserId, items } = req.body || {};
     if (!customerUserId) return res.status(400).json({ error: "customerUserId is required" });
@@ -754,7 +768,7 @@ app.post("/api/lab/orders", verifyToken, requireStaff, (req, res) => {
   })();
 });
 
-app.get("/api/lab/bookings", verifyToken, requireStaff, (_req, res) => {
+app.get("/api/lab/bookings", verifyToken, hydrateUserRole, requireStaff, (_req, res) => {
   query(
     `
     SELECT b.id, b.user_id AS "userId", u.email AS "userEmail", b.email, b.name,
@@ -770,7 +784,7 @@ app.get("/api/lab/bookings", verifyToken, requireStaff, (_req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to fetch bookings", detail: error.message }));
 });
 
-app.get("/api/lab/leads", verifyToken, requireStaff, (_req, res) => {
+app.get("/api/lab/leads", verifyToken, hydrateUserRole, requireStaff, (_req, res) => {
   query(
     `SELECT id, email, name, message, product_id AS "productId", source, meta, created_at AS "createdAt" FROM leads ORDER BY created_at DESC LIMIT 200`
   )
@@ -778,13 +792,13 @@ app.get("/api/lab/leads", verifyToken, requireStaff, (_req, res) => {
     .catch((error) => res.status(500).json({ error: "Failed to fetch leads", detail: error.message }));
 });
 
-app.get("/api/lab/admin/users", verifyToken, requireStaff, adminGuard, (_req, res) => {
+app.get("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, adminGuard, (_req, res) => {
   query(`SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC`)
     .then((result) => res.json({ items: result.rows.map((row) => publicUser(row, { includeRole: true })) }))
     .catch((error) => res.status(500).json({ error: "Failed to fetch users", detail: error.message }));
 });
 
-app.post("/api/lab/admin/users", verifyToken, requireStaff, adminGuard, async (req, res) => {
+app.post("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, adminGuard, async (req, res) => {
   const { email, password, name, role } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
@@ -806,7 +820,7 @@ app.post("/api/lab/admin/users", verifyToken, requireStaff, adminGuard, async (r
   }
 });
 
-app.get("/api/lab/n8n/webhook-payload/order-created/:id", verifyToken, requireStaff, (req, res) => {
+app.get("/api/lab/n8n/webhook-payload/order-created/:id", verifyToken, hydrateUserRole, requireStaff, (req, res) => {
   query(
     `
     SELECT
