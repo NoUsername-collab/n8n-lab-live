@@ -171,6 +171,7 @@
       <div class="grid">
         <div class="panel">
           <h2>Register</h2>
+          <p class="tiny">Fiecare email poate exista o singura data in baza de date (Render/Postgres). Daca primesti eroare la inregistrare, contul exista deja: foloseste tab-ul Login.</p>
           <label for="authName">Name</label><input id="authName" placeholder="Alex" />
           <label for="authEmail">Email</label><input id="authEmail" placeholder="alex@example.com" />
           <label for="authPassword">Password</label><input id="authPassword" type="password" placeholder="minimum 6 caractere" />
@@ -178,7 +179,7 @@
         </div>
         <div class="panel">
           <h2>Login</h2>
-          <p class="tiny">Email-ul existent nu poate fi inregistrat din nou. Foloseste login.</p>
+          <p class="tiny">Introdu email si parola contului tau. Datele sunt in baza live (acelasi backend ca API-ul).</p>
           <label>Email</label><input id="loginEmail" placeholder="alex@example.com" />
           <label>Password</label><input id="loginPassword" type="password" placeholder="password" />
           <div class="btn-row">
