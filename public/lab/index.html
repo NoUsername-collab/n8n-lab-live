@@ -508,7 +508,13 @@
         await refreshMyAccount();
         await fetchActivityFeed();
         startActivityPollIfNeeded();
-      } catch (e) { setStatus(e.message, "err"); toast("Login failed", "err"); }
+      } catch (e) {
+        const msg = e && e.message ? String(e.message) : "Login failed";
+        el.authState.className = "status err";
+        el.authState.textContent = msg;
+        setStatus(msg, "err");
+        toast(`Login: ${msg}`, "err");
+      }
     }));
 
     el.btnLogout.addEventListener("click", () => {
