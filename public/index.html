@@ -31,6 +31,7 @@
     .window.active { display:block; }
     .panel { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:14px; box-shadow:var(--shadow); margin-top:12px; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+    .auth-banner { grid-column:1 / -1; margin:0; padding:10px 12px; border-radius:12px; border:1px solid var(--border); background:color-mix(in srgb,var(--card),var(--panel) 35%); color:var(--muted); }
     .row { display:flex; gap:8px; flex-wrap:wrap; } .row > * { flex:1; min-width:120px; }
     label { display:block; margin:8px 0 5px; font-size:.89rem; }
     input,select,textarea,button { width:100%; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--text); padding:9px 10px; font-size:.92rem; transition:border-color .2s ease,box-shadow .2s ease,transform .08s ease,opacity .2s ease; }
@@ -87,7 +88,7 @@
     <div class="header">
       <div class="header-left">
         <h1>n8n Lab Playground</h1>
-        <p class="muted"><strong>App</strong> separat de <strong>Auth</strong> si <strong>Admin</strong> (cu Settings integrate).</p>
+        <p class="muted"><strong>App</strong> · tab <strong>Inregistrare · Login</strong> (vizitator) / <strong>Cont</strong> (conectat) · <strong>Admin</strong> (settings, useri DB).</p>
         <div class="badges">
           <span id="badgeApi" class="badge">API disconnected</span>
           <span id="badgeAuth" class="badge">Not logged in</span>
@@ -96,7 +97,7 @@
       </div>
       <div class="header-right">
         <button class="tab-btn active" data-tab="app">App</button>
-        <button class="tab-btn" data-tab="auth">Auth</button>
+        <button type="button" class="tab-btn" id="tabAuthBtn" data-tab="auth">Inregistrare · Login</button>
         <button class="tab-btn" data-tab="admin">Admin</button>
         <select id="themeSelect" class="small-btn" style="width:auto;">
           <option value="dark">Theme: Dark</option>
@@ -168,24 +169,25 @@
     </section>
 
     <section class="window" data-window="auth">
-      <div class="grid">
-        <div class="panel">
-          <h2>Register</h2>
-          <p class="tiny">Fiecare email poate exista o singura data in baza de date (Render/Postgres). Daca primesti eroare la inregistrare, contul exista deja: foloseste tab-ul Login.</p>
+      <div class="grid" id="authGrid">
+        <p id="authModeBanner" class="tiny auth-banner">Vizitator: ai <strong>Inregistrare</strong> (cont nou) si <strong>Login</strong> (cont existent) mai jos.</p>
+        <div class="panel" id="registerPanel">
+          <h2>Inregistrare</h2>
+          <p class="tiny">Fiecare email exista o singura data in Postgres. Daca primesti eroare „exists”, contul e deja creat: foloseste <strong>Login</strong> in panoul din dreapta.</p>
           <label for="authName">Name</label><input id="authName" placeholder="Alex" />
           <label for="authEmail">Email</label><input id="authEmail" placeholder="alex@example.com" />
           <label for="authPassword">Password</label><input id="authPassword" type="password" placeholder="minimum 6 caractere" />
           <div class="btn-row"><button id="btnRegister" class="btn-success">Create account</button></div>
         </div>
-        <div class="panel">
-          <h2>Login</h2>
-          <p class="tiny">Introdu email si parola contului tau. Datele sunt in baza live (acelasi backend ca API-ul).</p>
-          <label>Email</label><input id="loginEmail" placeholder="alex@example.com" />
-          <label>Password</label><input id="loginPassword" type="password" placeholder="password" />
-          <div class="btn-row">
-            <button id="btnLogin" class="btn-primary">Login</button>
-            <button id="btnLogout" class="btn-danger">Logout</button>
+        <div class="panel" id="loginPanel">
+          <h2 id="loginPanelTitle">Login</h2>
+          <p id="loginPanelHint" class="tiny">Introdu email si parola. Acelasi backend ca la API (Render).</p>
+          <div id="loginCredentials">
+            <label>Email</label><input id="loginEmail" placeholder="alex@example.com" />
+            <label>Password</label><input id="loginPassword" type="password" placeholder="password" />
+            <div class="btn-row"><button id="btnLogin" class="btn-primary">Login</button></div>
           </div>
+          <div id="loggedInBar" class="btn-row" style="display:none;"><button id="btnLogout" class="btn-danger">Logout</button></div>
           <div id="authState" class="status">Not logged in.</div>
           <div id="myAccountPanel" class="panel" style="margin-top:12px; padding:12px; display:none; border:1px solid var(--border); border-radius:12px; background:var(--card);">
             <h3 style="margin:0 0 8px;">Contul tau in Postgres</h3>
@@ -211,10 +213,10 @@
         </div>
         <label for="adminKey">Admin Key (obligatoriu pe Render daca ai setat <code>ADMIN_KEY</code>)</label>
         <input id="adminKey" placeholder="Lipeste exact valoarea din Render → Environment" />
-        <p class="tiny">Fara aceasta cheie, <strong>lista completa de useri</strong> (Refresh users) primeste 403 — userul exista in DB, dar API-ul refuza lista. Contul tau il vezi oricum in tab-ul Auth dupa login.</p>
+        <p class="tiny">Fara aceasta cheie, <strong>lista completa de useri</strong> (Refresh users) primeste 403 — userul exista in DB, dar API-ul refuza lista. Contul tau il vezi in tab <strong>Cont</strong> (sectiunea Postgres).</p>
         <div id="settingsStatus" class="status">Settings not tested yet.</div>
       </div>
-      <div id="adminLock" class="admin-lock">Admin panel e blocat pana faci login in tab-ul Auth.</div>
+      <div id="adminLock" class="admin-lock">Admin e blocat pana te conectezi din tab <strong>Inregistrare · Login</strong>.</div>
       <div id="adminContent" class="grid" style="display:none;">
         <div class="panel">
           <h2>Create local DB user</h2>
@@ -248,9 +250,10 @@
     const templates = { lead: { fullName: "John Demo", email: "john@example.com", budget: 300 }, order: { event: "order.created", orderId: "ORD-1001", amount: 249.99 }, ragQuery: { question: "Cum anulez abonamentul?" } };
     const el = {
       body: document.body, toasts: document.getElementById("toasts"), themeSelect: document.getElementById("themeSelect"),
-      tabs: [...document.querySelectorAll(".tab-btn")], windows: [...document.querySelectorAll(".window")],
+      tabs: [...document.querySelectorAll(".tab-btn")], tabAuthBtn: document.getElementById("tabAuthBtn"), windows: [...document.querySelectorAll(".window")],
       badgeApi: document.getElementById("badgeApi"), badgeAuth: document.getElementById("badgeAuth"), badgeAdmin: document.getElementById("badgeAdmin"),
       apiBase: document.getElementById("apiBase"), btnSaveSettings: document.getElementById("btnSaveSettings"), btnPing: document.getElementById("btnPing"), settingsStatus: document.getElementById("settingsStatus"),
+      authModeBanner: document.getElementById("authModeBanner"), registerPanel: document.getElementById("registerPanel"), loginPanel: document.getElementById("loginPanel"), loginPanelTitle: document.getElementById("loginPanelTitle"), loginPanelHint: document.getElementById("loginPanelHint"), loginCredentials: document.getElementById("loginCredentials"), loggedInBar: document.getElementById("loggedInBar"),
       authName: document.getElementById("authName"), authEmail: document.getElementById("authEmail"), authPassword: document.getElementById("authPassword"), loginEmail: document.getElementById("loginEmail"), loginPassword: document.getElementById("loginPassword"),
       btnRegister: document.getElementById("btnRegister"), btnLogin: document.getElementById("btnLogin"), btnLogout: document.getElementById("btnLogout"), authState: document.getElementById("authState"),
       adminKey: document.getElementById("adminKey"), adminLock: document.getElementById("adminLock"), adminContent: document.getElementById("adminContent"),
@@ -273,8 +276,20 @@
     function toast(message, kind = "ok") { const t = document.createElement("div"); t.className = `toast ${kind}`; t.textContent = message; el.toasts.appendChild(t); setTimeout(() => t.remove(), 2800); }
     function setLoading(button, loadingText, promiseFactory) { const old = button.textContent; button.disabled = true; button.textContent = loadingText; return promiseFactory().finally(() => { button.disabled = false; button.textContent = old; }); }
     function refreshAuthState() {
-      el.authState.className = "status " + (state.user ? "ok" : "warn");
-      el.authState.textContent = state.user ? `Logged in as ${state.user.email}` : "Not logged in.";
+      const logged = Boolean(state.user);
+      el.authState.className = "status " + (logged ? "ok" : "warn");
+      el.authState.textContent = logged ? `Conectat: ${state.user.email}` : "Nu esti conectat.";
+      el.registerPanel.style.display = logged ? "none" : "";
+      el.loginCredentials.style.display = logged ? "none" : "";
+      el.loggedInBar.style.display = logged ? "flex" : "none";
+      el.loginPanelTitle.textContent = logged ? "Sesiune activa" : "Login";
+      el.loginPanelHint.textContent = logged
+        ? "Inregistrarea e ascunsa cat timp esti logat. Pentru alt cont: Logout, apoi inregistrare sau login."
+        : "Introdu email si parola. Acelasi backend ca la API (Render).";
+      el.authModeBanner.innerHTML = logged
+        ? "Esti <strong>conectat</strong>. Panoul <strong>Inregistrare</strong> e ascuns; pentru cont nou foloseste <strong>Logout</strong>."
+        : "Vizitator: ai <strong>Inregistrare</strong> (cont nou) si <strong>Login</strong> (cont existent) mai jos.";
+      if (el.tabAuthBtn) el.tabAuthBtn.textContent = logged ? "Cont" : "Inregistrare · Login";
       void refreshMyAccount();
     }
     function refreshBadges() {
@@ -406,7 +421,7 @@
 
     async function fetchActivityFeed() {
       if (!state.token) {
-        el.activityHint.innerHTML = 'Log in in tab <strong>Auth</strong> pentru a vedea feed-ul live.';
+        el.activityHint.innerHTML = 'Conecteaza-te din tab <strong>Inregistrare · Login</strong> pentru feed live.';
         renderActivityTimeline([]);
         return;
       }
