@@ -177,7 +177,7 @@
         <p class="tiny auth-banner">Acces <strong>staff</strong> (role în DB = <code>staff</code>). Conturile de magazin se creează doar în <a href="/store/">/store/</a>.</p>
         <div class="panel" id="loginPanel">
           <h2 id="loginPanelTitle">Staff login</h2>
-          <p id="loginPanelHint" class="tiny">Foloseste contul creat din env <code>LAB_STAFF_EMAIL</code> / <code>LAB_STAFF_PASSWORD</code> la primul deploy.</p>
+          <p id="loginPanelHint" class="tiny">Login cu valorile din env <code>LAB_STAFF_EMAIL</code> + <code>LAB_STAFF_PASSWORD</code> (la fiecare boot serverul le sincronizează în DB).</p>
           <div id="loginCredentials">
             <label>Email</label><input id="loginEmail" placeholder="staff@yourcompany.com" />
             <label>Password</label><input id="loginPassword" type="password" placeholder="password" />
@@ -287,7 +287,7 @@
       el.loginPanelTitle.textContent = logged ? "Sesiune staff" : "Staff login";
       el.loginPanelHint.textContent = logged
         ? "Logout pentru a schimba contul staff."
-        : "Cont creat automat din variabilele de mediu LAB_STAFF_* (vezi README).";
+        : "Operator lab = env LAB_STAFF_*; după schimbare env fă redeploy apoi login aici.";
       if (el.tabAuthBtn) el.tabAuthBtn.textContent = logged ? "Staff ✓" : "Staff";
       void refreshMyAccount();
     }
@@ -383,7 +383,7 @@
         renderUsersTable({ items: [] });
         el.usersEmpty.style.display = "block";
         if (msg.toLowerCase().includes("staff")) {
-          el.usersEmpty.innerHTML = "Acces staff respins: fă <strong>Logout</strong>, apoi login din nou. Dacă emailul tău era client înainte, pe Render setează <code>LAB_STAFF_PROMOTE=true</code> și redeploy (vezi README).";
+          el.usersEmpty.innerHTML = "Acces staff respins: <strong>Logout</strong>, redeploy dacă ai schimbat <code>LAB_STAFF_*</code> în Render, apoi login cu <strong>LAB_STAFF_EMAIL</strong> + <strong>LAB_STAFF_PASSWORD</strong> (sincronizate la fiecare boot).";
         } else {
           el.usersEmpty.textContent = msg || "Load failed";
         }

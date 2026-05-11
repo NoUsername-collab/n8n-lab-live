@@ -10,11 +10,12 @@ Playground for learning **n8n** with a clean split:
 
 ## Arhitectură
 
-- **`users.role`**: `customer` (magazin) sau `staff` (lab). **Clienți reali** doar prin **`/store/`** (`POST /api/store/auth/register`). **Un singur cont staff** poate fi creat automat la boot din **`LAB_STAFF_EMAIL`** + **`LAB_STAFF_PASSWORD`** dacă acel email **nu există** încă în DB. Nu există „înregistrare staff” în UI — nu se poate crea `staff` prin API.
+- **`users.role`**: `customer` (magazin) sau `staff` (lab). **Clienți reali** doar prin **`/store/`** (`POST /api/store/auth/register`).
+- **Un singur „operator lab” (sursă unică):** la **fiecare pornire** a serverului, rândul cu email **`LAB_STAFF_EMAIL`** este **`staff`** iar parola devine **`LAB_STAFF_PASSWORD`** din env (dacă emailul exista deja, se face **UPDATE**; dacă nu, **INSERT**). Nu mai există flag separat tip „promote”. Nu se creează `staff` prin API.
 - **`LAB_ALLOW_MANUAL_USERS`**: dacă **nu** e `true`, **`POST /api/lab/admin/users`** e dezactivat (implicit în producție fără env = oprit). În `.env` local pune `LAB_ALLOW_MANUAL_USERS=true` doar dacă vrei butonul din lab pentru conturi de test.
 - **Store API** — prefix **`/api/store/`** (login/register doar clienți; lead fără auth).
 - **Lab API** — prefix **`/api/lab/`** (JWT **staff**). Lista useri: **`GET /api/lab/admin/users`**. Creare user din lab: **`POST /api/lab/admin/users`** doar dacă **`LAB_ALLOW_MANUAL_USERS=true`** și creează **doar** `customer` (niciodată staff).
-- **Staff vs „admin”** — există doar **rolul `staff` în Postgres** + login la `/lab/`. Nu mai există **`ADMIN_KEY`** / `x-admin-key` pentru acest proiect (era confuz și dublu). Dacă ai folosit același email ca la magazin înainte să fii staff, setează **`LAB_STAFF_PROMOTE=true`** în Render și redeploy: la boot, acel user devine `staff` și primește parola din **`LAB_STAFF_PASSWORD`**.
+- **Staff** — login doar la **`/lab/`** cu **`LAB_STAFF_EMAIL`** + **`LAB_STAFF_PASSWORD`** (aceleași valori ca în env; rescrierea în DB se face la boot). Nu există **`ADMIN_KEY`** pentru acest flux.
 - **Evenimente** (`order.created`, `lead.created`, `booking.requested`, …) în **`events`**; staff le vede în lab. Leaduri în **`leads`**, rezervări în **`bookings`**.
 - **Webhook-uri outbound** (opțional): după commit în DB, serverul trimite `POST` JSON către `N8N_*_WEBHOOK_URL`. Semnătură opțională HMAC-SHA256 în header **`X-Lab-Signature: sha256=<hex>`** dacă setezi **`N8N_WEBHOOK_SECRET`** (verifică în n8n cu Crypto node).
 - **Rate limit** comun pentru **`POST /api/store/leads`** și **`POST /api/store/bookings`**: `STORE_PUBLIC_RATE_MAX` cereri / `STORE_PUBLIC_RATE_WINDOW_MS` per IP (implicit 40 / 15 min). Răspuns **429** + `retryAfterSec`.
@@ -67,7 +68,7 @@ npm start
 
 ## Deploy (Render)
 
-Setează variabile: `DATABASE_URL`, `JWT_SECRET`, `LAB_STAFF_EMAIL`, `LAB_STAFF_PASSWORD`, opțional `LAB_STAFF_PROMOTE=true`, `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit. **`LAB_ALLOW_MANUAL_USERS`** nu seta (sau `false`) pe producție ca să nu se mai poată crea conturi din lab. Poți șterge `ADMIN_KEY` dacă îl mai ai.
+Setează variabile: `DATABASE_URL`, `JWT_SECRET`, **`LAB_STAFF_EMAIL`**, **`LAB_STAFF_PASSWORD`**, opțional `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit. **`LAB_ALLOW_MANUAL_USERS`** nu seta (sau `false`) pe producție. Poți șterge `ADMIN_KEY` dacă îl mai ai. **`LAB_STAFF_PROMOTE`** nu mai există în cod — poți șterge variabila din Render dacă o mai ai.
 
 ### Reset conturi în Postgres („supă” de useri de test)
 
@@ -77,7 +78,7 @@ Păstrezi produsele; ștergi toți userii și datele legate; la următorul resta
 TRUNCATE TABLE order_items, orders, bookings, leads, events, users RESTART IDENTITY CASCADE;
 ```
 
-Apoi redeploy / restart app (rulează `ensureStaffUser` și inserează din nou staff-ul din env dacă emailul nu există).
+Apoi redeploy / restart app: la boot, `syncLabStaffFromEnv` recreează/sincronizează operatorul din **`LAB_STAFF_*`**.
 
 După deploy: URL-ul serviciului = și **API Base** în lab, și originea pentru fetch în magazin (același host).
 

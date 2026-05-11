@@ -15,7 +15,6 @@ const DATABASE_URL = process.env.DATABASE_URL || "";
 const LAB_STAFF_EMAIL = (process.env.LAB_STAFF_EMAIL || "").trim().toLowerCase();
 const LAB_STAFF_PASSWORD = process.env.LAB_STAFF_PASSWORD || "";
 const LAB_STAFF_NAME = process.env.LAB_STAFF_NAME || "Lab Staff";
-const LAB_STAFF_PROMOTE = process.env.LAB_STAFF_PROMOTE === "true" || process.env.LAB_STAFF_PROMOTE === "1";
 /** Doar dacă e true: POST /api/lab/admin/users poate crea clienți din lab. În producție lasă false — clienți reali doar din /store/register. */
 const LAB_ALLOW_MANUAL_USERS = process.env.LAB_ALLOW_MANUAL_USERS === "true" || process.env.LAB_ALLOW_MANUAL_USERS === "1";
 const STORE_HOST = (process.env.STORE_HOST || "").trim().toLowerCase();
@@ -245,36 +244,34 @@ async function migrate() {
 }
 
 /**
- * Dacă emailul din LAB_STAFF_EMAIL exista deja ca **client**, ensureStaffUser nu îl crea.
- * Setează LAB_STAFF_PROMOTE=true ca la fiecare boot să faci UPDATE: role=staff + parola din env.
+ * Un singur „operator lab”: LAB_STAFF_EMAIL + LAB_STAFF_PASSWORD (+ LAB_STAFF_NAME).
+ * La fiecare boot: dacă există rând cu acel email → UPDATE role=staff + parola din env; altfel → INSERT staff.
+ * Schimbarea parolei în Render și redeploy este mereu sursa de adevăr (nu mai există LAB_STAFF_PROMOTE).
  */
-async function promoteStaffFromEnv() {
-  if (!LAB_STAFF_PROMOTE || !LAB_STAFF_EMAIL || !LAB_STAFF_PASSWORD) return;
+async function syncLabStaffFromEnv() {
+  if (!LAB_STAFF_EMAIL || !LAB_STAFF_PASSWORD) {
+    console.warn("[init] LAB_STAFF_EMAIL sau LAB_STAFF_PASSWORD lipsesc — nu se sincronizează operatorul lab.");
+    return;
+  }
   const passwordHash = await bcrypt.hash(LAB_STAFF_PASSWORD, 10);
-  const r = await query(
+  const upd = await query(
     `UPDATE users SET role = 'staff', password_hash = $1, name = COALESCE(NULLIF(TRIM(name), ''), $3) WHERE lower(email) = lower($2)`,
     [passwordHash, LAB_STAFF_EMAIL, LAB_STAFF_NAME]
   );
-  if (r.rowCount) console.log(`[init] LAB_STAFF_PROMOTE: ${LAB_STAFF_EMAIL} → staff (parola actualizată din env).`);
-  else console.warn(`[init] LAB_STAFF_PROMOTE: niciun rând pentru ${LAB_STAFF_EMAIL} — se va încerca crearea cu ensureStaffUser.`);
-}
-
-async function ensureStaffUser() {
-  if (!LAB_STAFF_EMAIL || !LAB_STAFF_PASSWORD) return;
-  const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [LAB_STAFF_EMAIL]);
-  if (existing.rowCount) return;
-  const passwordHash = await bcrypt.hash(LAB_STAFF_PASSWORD, 10);
+  if (upd.rowCount > 0) {
+    console.log(`[init] Lab operator synced: ${LAB_STAFF_EMAIL} (staff, parolă din LAB_STAFF_PASSWORD).`);
+    return;
+  }
   await query(
     `INSERT INTO users (id, email, name, password_hash, role) VALUES ($1, $2, $3, $4, 'staff')`,
     [nanoid(10), LAB_STAFF_EMAIL, LAB_STAFF_NAME, passwordHash]
   );
-  console.log(`[init] Staff user created: ${LAB_STAFF_EMAIL} (role=staff). Change password after first deploy.`);
+  console.log(`[init] Lab operator creat: ${LAB_STAFF_EMAIL} (staff).`);
 }
 
 async function initDb() {
   await migrate();
-  await promoteStaffFromEnv();
-  await ensureStaffUser();
+  await syncLabStaffFromEnv();
 }
 
 function signUserToken(user) {
@@ -315,7 +312,7 @@ function requireStaff(req, res, next) {
       resolvedRole: req.user.role || null,
       hint:
         req.user.role === "customer"
-          ? "Contul tău în Postgres este customer. Folosește LAB_STAFF_PROMOTE + LAB_STAFF_EMAIL pentru același email sau schimbă rolul manual în DB."
+          ? "JWT e pentru alt cont sau DB învechit: operatorul lab este mereu rândul LAB_STAFF_EMAIL (staff la fiecare boot). Logout, redeploy dacă ai schimbat env, apoi login cu LAB_STAFF_*."
           : undefined
     });
   }
@@ -829,7 +826,7 @@ app.post("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, asy
   if (role === "staff") {
     return res.status(403).json({
       error: "Staff cannot be created via API",
-      hint: "Singurul staff automat este din LAB_STAFF_EMAIL + LAB_STAFF_PASSWORD la boot; client existent → LAB_STAFF_PROMOTE."
+      hint: "Operatorul lab este doar rândul LAB_STAFF_EMAIL, sincronizat la fiecare boot din env (nu se creează staff prin API)."
     });
   }
   if (!LAB_ALLOW_MANUAL_USERS) {
