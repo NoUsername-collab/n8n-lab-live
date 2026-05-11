@@ -1,46 +1,99 @@
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { nanoid } = require("nanoid");
+const { Pool } = require("pg");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const ADMIN_KEY = process.env.ADMIN_KEY || "";
-const DATA_FILE = path.join(__dirname, "data", "db.json");
+const DATABASE_URL = process.env.DATABASE_URL || "";
+
+if (!DATABASE_URL) {
+  throw new Error("DATABASE_URL is required. Add a Postgres connection string in environment variables.");
+}
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
+});
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
-function ensureDataFile() {
-  const dir = path.dirname(DATA_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+async function query(text, params = []) {
+  return pool.query(text, params);
+}
 
-  if (!fs.existsSync(DATA_FILE)) {
-    const initial = {
-      users: [],
-      products: [
-        { id: "prod_1", name: "Starter Automation Audit", price: 79, currency: "EUR", stock: 20 },
-        { id: "prod_2", name: "Lead Capture Workflow Pack", price: 149, currency: "EUR", stock: 12 },
-        { id: "prod_3", name: "n8n Support Retainer (monthly)", price: 199, currency: "EUR", stock: 99 }
-      ],
-      orders: [],
-      events: []
-    };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), "utf8");
+async function initDb() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      price NUMERIC(10,2) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      stock INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      total NUMERIC(10,2) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'EUR',
+      status TEXT NOT NULL DEFAULT 'created',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id BIGSERIAL PRIMARY KEY,
+      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      product_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      qty INTEGER NOT NULL,
+      unit_price NUMERIC(10,2) NOT NULL,
+      line_total NUMERIC(10,2) NOT NULL
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      order_id TEXT,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  const countResult = await query(`SELECT COUNT(*)::int AS count FROM products`);
+  if (countResult.rows[0].count === 0) {
+    await query(
+      `
+      INSERT INTO products (id, name, price, currency, stock)
+      VALUES
+        ('prod_1', 'Starter Automation Audit', 79, 'EUR', 20),
+        ('prod_2', 'Lead Capture Workflow Pack', 149, 'EUR', 12),
+        ('prod_3', 'n8n Support Retainer (monthly)', 199, 'EUR', 99)
+      `
+    );
   }
-}
-
-function readDb() {
-  ensureDataFile();
-  return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-}
-
-function writeDb(db) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
 }
 
 function authRequired(req, res, next) {
@@ -69,12 +122,12 @@ function publicUser(user) {
     id: user.id,
     email: user.email,
     name: user.name,
-    createdAt: user.createdAt
+    createdAt: user.created_at || user.createdAt
   };
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "n8n-lab-live", now: new Date().toISOString() });
+  res.json({ ok: true, service: "n8n-lab-live", db: "postgres", now: new Date().toISOString() });
 });
 
 app.post("/api/auth/register", async (req, res) => {
@@ -82,36 +135,52 @@ app.post("/api/auth/register", async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
 
-  const db = readDb();
-  const existing = db.users.find((u) => u.email.toLowerCase() === String(email).toLowerCase());
-  if (existing) return res.status(409).json({ error: "User already exists" });
+  try {
+    const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
+    if (existing.rowCount) return res.status(409).json({ error: "User already exists" });
 
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = { id: nanoid(10), email, name: name || "User", passwordHash, createdAt: new Date().toISOString() };
-  db.users.push(user);
-  writeDb(db);
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `
+      INSERT INTO users (id, email, name, password_hash)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, email, name, created_at
+      `,
+      [nanoid(10), email, name || "User", passwordHash]
+    );
 
-  res.status(201).json(publicUser(user));
+    res.status(201).json(publicUser(result.rows[0]));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create user", detail: error.message });
+  }
 });
 
 app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
 
-  const db = readDb();
-  const user = db.users.find((u) => u.email.toLowerCase() === String(email).toLowerCase());
-  if (!user) return res.status(401).json({ error: "Invalid credentials" });
+  try {
+    const result = await query(
+      `SELECT id, email, name, password_hash, created_at FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+      [email]
+    );
+    if (!result.rowCount) return res.status(401).json({ error: "Invalid credentials" });
 
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+    const user = result.rows[0];
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
-  const token = jwt.sign({ sub: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
-  res.json({ token, user: publicUser(user) });
+    const token = jwt.sign({ sub: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
+    res.json({ token, user: publicUser(user) });
+  } catch (error) {
+    res.status(500).json({ error: "Login failed", detail: error.message });
+  }
 });
 
 app.get("/api/admin/users", adminGuard, (req, res) => {
-  const db = readDb();
-  res.json({ items: db.users.map(publicUser) });
+  query(`SELECT id, email, name, created_at FROM users ORDER BY created_at DESC`)
+    .then((result) => res.json({ items: result.rows.map(publicUser) }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch users", detail: error.message }));
 });
 
 app.post("/api/admin/users", adminGuard, async (req, res) => {
@@ -119,16 +188,24 @@ app.post("/api/admin/users", adminGuard, async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
 
-  const db = readDb();
-  const existing = db.users.find((u) => u.email.toLowerCase() === String(email).toLowerCase());
-  if (existing) return res.status(409).json({ error: "User already exists" });
+  try {
+    const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
+    if (existing.rowCount) return res.status(409).json({ error: "User already exists" });
 
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = { id: nanoid(10), email, name: name || "User", passwordHash, createdAt: new Date().toISOString() };
-  db.users.push(user);
-  writeDb(db);
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `
+      INSERT INTO users (id, email, name, password_hash)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, email, name, created_at
+      `,
+      [nanoid(10), email, name || "User", passwordHash]
+    );
 
-  res.status(201).json(publicUser(user));
+    res.status(201).json(publicUser(result.rows[0]));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create user", detail: error.message });
+  }
 });
 
 app.get("/api/me", authRequired, (req, res) => {
@@ -136,74 +213,147 @@ app.get("/api/me", authRequired, (req, res) => {
 });
 
 app.get("/api/products", (_req, res) => {
-  const db = readDb();
-  res.json({ items: db.products });
+  query(`SELECT id, name, price::float AS price, currency, stock FROM products ORDER BY name ASC`)
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch products", detail: error.message }));
 });
 
 app.post("/api/orders", authRequired, (req, res) => {
-  const { items } = req.body || {};
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: "items[] is required" });
-  }
+  (async () => {
+    const { items } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "items[] is required" });
+    }
 
-  const db = readDb();
-  const lineItems = [];
-  let total = 0;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const lineItems = [];
+      let total = 0;
 
-  for (const line of items) {
-    const product = db.products.find((p) => p.id === line.productId);
-    if (!product) return res.status(400).json({ error: `Unknown product: ${line.productId}` });
+      for (const line of items) {
+        const productResult = await client.query(
+          `SELECT id, name, price::float AS price FROM products WHERE id = $1 LIMIT 1`,
+          [line.productId]
+        );
+        if (!productResult.rowCount) return res.status(400).json({ error: `Unknown product: ${line.productId}` });
 
-    const qty = Number(line.qty || 1);
-    if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "qty must be >= 1" });
+        const product = productResult.rows[0];
+        const qty = Number(line.qty || 1);
+        if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "qty must be >= 1" });
 
-    lineItems.push({
-      productId: product.id,
-      name: product.name,
-      qty,
-      unitPrice: product.price,
-      lineTotal: Number((qty * product.price).toFixed(2))
-    });
-    total += qty * product.price;
-  }
+        const lineTotal = Number((qty * Number(product.price)).toFixed(2));
+        lineItems.push({
+          productId: product.id,
+          name: product.name,
+          qty,
+          unitPrice: Number(product.price),
+          lineTotal
+        });
+        total += lineTotal;
+      }
 
-  const order = {
-    id: "ord_" + nanoid(8),
-    userId: req.user.sub,
-    items: lineItems,
-    total: Number(total.toFixed(2)),
-    currency: "EUR",
-    status: "created",
-    createdAt: new Date().toISOString()
-  };
-  db.orders.push(order);
+      const orderId = "ord_" + nanoid(8);
+      await client.query(
+        `
+        INSERT INTO orders (id, user_id, total, currency, status)
+        VALUES ($1, $2, $3, 'EUR', 'created')
+        `,
+        [orderId, req.user.sub, Number(total.toFixed(2))]
+      );
 
-  const event = {
-    id: "evt_" + nanoid(10),
-    type: "order.created",
-    orderId: order.id,
-    payload: order,
-    createdAt: new Date().toISOString()
-  };
-  db.events.push(event);
+      for (const item of lineItems) {
+        await client.query(
+          `
+          INSERT INTO order_items (order_id, product_id, name, qty, unit_price, line_total)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [orderId, item.productId, item.name, item.qty, item.unitPrice, item.lineTotal]
+        );
+      }
 
-  writeDb(db);
-  res.status(201).json({ order, event });
+      const order = {
+        id: orderId,
+        userId: req.user.sub,
+        items: lineItems,
+        total: Number(total.toFixed(2)),
+        currency: "EUR",
+        status: "created",
+        createdAt: new Date().toISOString()
+      };
+
+      const event = {
+        id: "evt_" + nanoid(10),
+        type: "order.created",
+        orderId: order.id,
+        payload: order,
+        createdAt: new Date().toISOString()
+      };
+
+      await client.query(
+        `INSERT INTO events (id, type, order_id, payload) VALUES ($1, $2, $3, $4::jsonb)`,
+        [event.id, event.type, event.orderId, JSON.stringify(event.payload)]
+      );
+
+      await client.query("COMMIT");
+      res.status(201).json({ order, event });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "Failed to create order", detail: error.message });
+    } finally {
+      client.release();
+    }
+  })();
 });
 
 app.get("/api/orders", authRequired, (req, res) => {
-  const db = readDb();
-  const items = db.orders.filter((o) => o.userId === req.user.sub);
-  res.json({ items });
+  query(
+    `
+    SELECT
+      o.id,
+      o.user_id AS "userId",
+      o.total::float AS total,
+      o.currency,
+      o.status,
+      o.created_at AS "createdAt",
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'productId', oi.product_id,
+            'name', oi.name,
+            'qty', oi.qty,
+            'unitPrice', oi.unit_price::float,
+            'lineTotal', oi.line_total::float
+          )
+        ) FILTER (WHERE oi.id IS NOT NULL),
+        '[]'::json
+      ) AS items
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    WHERE o.user_id = $1
+    GROUP BY o.id
+    ORDER BY o.created_at DESC
+    `,
+    [req.user.sub]
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch orders", detail: error.message }));
 });
 
 app.get("/api/events", authRequired, (_req, res) => {
-  const db = readDb();
-  res.json({ items: db.events.slice(-50).reverse() });
+  query(
+    `
+    SELECT id, type, order_id AS "orderId", payload, created_at AS "createdAt"
+    FROM events
+    ORDER BY created_at DESC
+    LIMIT 50
+    `
+  )
+    .then((result) => res.json({ items: result.rows }))
+    .catch((error) => res.status(500).json({ error: "Failed to fetch events", detail: error.message }));
 });
 
 app.post("/api/events/simulate", authRequired, (req, res) => {
-  const db = readDb();
   const type = req.body?.type || "lead.created";
   const payload = req.body?.payload || { source: "manual", score: 78 };
   const event = {
@@ -212,21 +362,54 @@ app.post("/api/events/simulate", authRequired, (req, res) => {
     payload,
     createdAt: new Date().toISOString()
   };
-  db.events.push(event);
-  writeDb(db);
-  res.status(201).json({ event });
+
+  query(
+    `INSERT INTO events (id, type, payload) VALUES ($1, $2, $3::jsonb)`,
+    [event.id, event.type, JSON.stringify(event.payload)]
+  )
+    .then(() => res.status(201).json({ event }))
+    .catch((error) => res.status(500).json({ error: "Failed to simulate event", detail: error.message }));
 });
 
 app.get("/api/n8n/webhook-payload/order-created/:id", authRequired, (req, res) => {
-  const db = readDb();
-  const order = db.orders.find((o) => o.id === req.params.id);
-  if (!order) return res.status(404).json({ error: "Order not found" });
-
-  res.json({
-    event: "order.created",
-    emittedAt: new Date().toISOString(),
-    data: order
-  });
+  query(
+    `
+    SELECT
+      o.id,
+      o.user_id AS "userId",
+      o.total::float AS total,
+      o.currency,
+      o.status,
+      o.created_at AS "createdAt",
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'productId', oi.product_id,
+            'name', oi.name,
+            'qty', oi.qty,
+            'unitPrice', oi.unit_price::float,
+            'lineTotal', oi.line_total::float
+          )
+        ) FILTER (WHERE oi.id IS NOT NULL),
+        '[]'::json
+      ) AS items
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    WHERE o.id = $1
+    GROUP BY o.id
+    LIMIT 1
+    `,
+    [req.params.id]
+  )
+    .then((result) => {
+      if (!result.rowCount) return res.status(404).json({ error: "Order not found" });
+      res.json({
+        event: "order.created",
+        emittedAt: new Date().toISOString(),
+        data: result.rows[0]
+      });
+    })
+    .catch((error) => res.status(500).json({ error: "Failed to prepare webhook payload", detail: error.message }));
 });
 
 app.use(express.static(path.join(__dirname, "public")));
@@ -234,6 +417,13 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`n8n-lab-live running on http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`n8n-lab-live running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to initialize database:", error);
+    process.exit(1);
+  });

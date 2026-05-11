@@ -4,6 +4,7 @@ Live playground for learning n8n with:
 - webhook testing UI
 - auth (register/login with JWT)
 - mock e-commerce APIs (products, orders, events)
+- PostgreSQL persistence (users/orders/events)
 - didactic roadmap and guided labs
 
 ## Run locally
@@ -20,13 +21,15 @@ npm install
 copy .env.example .env
 ```
 
-3. Start:
+3. Set `DATABASE_URL` in `.env` (required, Postgres connection string).
+
+4. Start:
 
 ```bash
 npm start
 ```
 
-4. Open:
+5. Open:
 - `http://localhost:3000`
 
 ## API endpoints
@@ -49,9 +52,21 @@ npm start
 3. Render auto-detects `render.yaml`.
 4. Set/confirm environment variables:
    - `JWT_SECRET`
+   - `ADMIN_KEY` (optional, recommended)
+   - `DATABASE_URL` (required)
 5. Deploy.
 
 After deploy, open your URL and set **API Base URL** to the same URL.
+
+## Render Postgres setup (Etapa 1)
+
+1. In Render dashboard: **New +** -> **PostgreSQL**
+2. Create database (free plan is fine for learning).
+3. Open the DB and copy **External Database URL**.
+4. In your `n8n-lab-live` web service -> **Environment**:
+   - set `DATABASE_URL` to that value
+   - keep `JWT_SECRET` and `ADMIN_KEY`
+5. Redeploy latest commit.
 
 ## n8n real-world tests you can do now
 
