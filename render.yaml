@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: n8n-lab-live
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true

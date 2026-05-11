@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>n8n Lab Playground</title>
+  <style>
+    :root { --bg:#0d1117; --panel:#161b22; --card:#1f2630; --text:#e6edf3; --muted:#9ba7b4; --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --danger:#f85149; --border:#30363d; }
+    body[data-theme="light"] { --bg:#f3f7fd; --panel:#fff; --card:#f8fbff; --text:#1d2b3a; --muted:#4e6072; --accent:#0b63d8; --ok:#167c35; --warn:#8a5a00; --danger:#b42318; --border:#d7e0ea; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 1180px; margin: 18px auto 40px; padding:0 16px; }
+    .header { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+    .muted { color: var(--muted); } .tiny { font-size:.86rem; color:var(--muted); }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .tab-btn { padding:8px 12px; border:1px solid var(--border); border-radius:9px; background:var(--card); cursor:pointer; }
+    .tab-btn.active { border-color: var(--accent); }
+    .window { display:none; margin-top:14px; }
+    .window.active { display:block; }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:14px; margin-top:12px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+    label { display:block; margin:8px 0 5px; font-size:.9rem; }
+    input,select,textarea,button { width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); }
+    textarea { min-height:130px; resize:vertical; font-family: ui-monospace,Consolas,monospace; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; } .row > * { flex:1; min-width:120px; }
+    .status { margin-top:10px; border:1px solid var(--border); border-radius:8px; padding:9px; background:var(--card); }
+    .status.ok { color: var(--ok); } .status.warn { color: var(--warn); } .status.err { color: var(--danger); }
+    .history-item { border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:7px; background:var(--card); }
+    .check { display:block; margin:7px 0; } .check input { width:auto; margin-right:8px; }
+    code { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:1px 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h1>n8n Lab Playground</h1>
+        <p class="muted">Organizat pe ferestre: Dashboard, Auth, Local DB, E-commerce, Webhook Lab.</p>
+      </div>
+      <button id="btnTheme" style="max-width:180px;">Toggle Light / Dark</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="auth">Auth</button>
+      <button class="tab-btn" data-tab="localdb">Local DB Users</button>
+      <button class="tab-btn" data-tab="store">E-commerce</button>
+      <button class="tab-btn" data-tab="webhook">Webhook Lab</button>
+    </div>
+
+    <section class="window active" data-window="dashboard">
+      <div class="panel">
+        <h2>Start rapid</h2>
+        <p class="tiny">Daca rulezi serverul local la tine, orice user creat de la distanta prin API ajunge in baza locala din <code>data/db.json</code>.</p>
+        <div class="check"><input class="learn-check" type="checkbox"> Webhook -> Sheets</div>
+        <div class="check"><input class="learn-check" type="checkbox"> API -> Transform -> Email</div>
+        <div class="check"><input class="learn-check" type="checkbox"> Auth + JWT + endpoint protejat</div>
+        <div class="check"><input class="learn-check" type="checkbox"> order.created flow in n8n</div>
+      </div>
+    </section>
+
+    <section class="window" data-window="auth">
+      <div class="panel">
+        <h2>Create/Login User</h2>
+        <label for="apiBase">API Base URL</label>
+        <input id="apiBase" placeholder="https://your-live-url" />
+        <div class="row">
+          <div><label for="authName">Name</label><input id="authName" /></div>
+          <div><label for="authEmail">Email</label><input id="authEmail" /></div>
+          <div><label for="authPassword">Password</label><input id="authPassword" type="password" /></div>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnRegister">Register</button>
+          <button id="btnLogin">Login</button>
+          <button id="btnLogout">Logout</button>
+        </div>
+        <p class="tiny" id="authState">Not logged in.</p>
+      </div>
+    </section>
+
+    <section class="window" data-window="localdb">
+      <div class="grid">
+        <div class="panel">
+          <h2>Create user direct in local DB</h2>
+          <p class="tiny">Optional: completeaza Admin Key daca ai setat <code>ADMIN_KEY</code> in backend.</p>
+          <label for="adminKey">Admin Key</label>
+          <input id="adminKey" placeholder="optional admin key" />
+          <div class="row">
+            <div><label for="localName">Name</label><input id="localName" /></div>
+            <div><label for="localEmail">Email</label><input id="localEmail" /></div>
+            <div><label for="localPassword">Password</label><input id="localPassword" type="password" /></div>
+          </div>
+          <button id="btnLocalCreate" style="margin-top:8px;">Create Local User</button>
+        </div>
+        <div class="panel">
+          <h2>Lista useri din DB local</h2>
+          <button id="btnLoadUsers">Refresh users</button>
+          <textarea id="usersOutput" readonly style="margin-top:8px;"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <section class="window" data-window="store">
+      <div class="panel">
+        <h2>E-commerce Simulation</h2>
+        <div class="row">
+          <button id="btnProducts">Load products</button>
+          <button id="btnCreateOrder">Create sample order</button>
+          <button id="btnSimEvent">Simulate lead event</button>
+        </div>
+        <textarea id="apiOutput" readonly style="margin-top:8px;"></textarea>
+      </div>
+    </section>
+
+    <section class="window" data-window="webhook">
+      <div class="grid">
+        <div class="panel">
+          <h2>Webhook Sender</h2>
+          <label for="webhookUrl">Webhook URL</label>
+          <input id="webhookUrl" />
+          <div class="row">
+            <div><label for="method">Method</label><select id="method"><option>POST</option><option>PUT</option><option>PATCH</option><option>GET</option></select></div>
+            <div><label for="contentType">Content-Type</label><select id="contentType"><option>application/json</option><option>text/plain</option></select></div>
+          </div>
+          <label for="template">Payload template</label>
+          <select id="template"><option value="lead">Lead</option><option value="order">Order</option><option value="ragQuery">RAG query</option><option value="custom">Custom</option></select>
+          <label for="payload">Payload</label>
+          <textarea id="payload"></textarea>
+          <div class="row"><button id="btnFormat">Format JSON</button><button id="btnCurl">Generate curl</button><button id="btnSend">Send</button></div>
+          <div id="status" class="status">Ready.</div>
+        </div>
+        <div class="panel">
+          <h2>Saved endpoints + history</h2>
+          <select id="savedList" size="6" style="height:130px;"></select>
+          <div class="row" style="margin-top:8px;"><button id="btnSave">Save endpoint</button><button id="btnLoad">Load selected</button><button id="btnDelete">Delete selected</button></div>
+          <label for="curlCmd">curl</label><textarea id="curlCmd" readonly></textarea>
+          <button id="btnClear">Clear history</button>
+          <div id="history" style="margin-top:8px;"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const templates = {
+      lead: { fullName: "John Demo", email: "john@example.com", budget: 300 },
+      order: { event: "order.created", orderId: "ORD-1001", amount: 249.99 },
+      ragQuery: { question: "Cum anulez abonamentul?" }
+    };
+    const el = {
+      body: document.body, btnTheme: document.getElementById("btnTheme"), tabs: [...document.querySelectorAll(".tab-btn")], windows: [...document.querySelectorAll(".window")],
+      apiBase: document.getElementById("apiBase"), authName: document.getElementById("authName"), authEmail: document.getElementById("authEmail"), authPassword: document.getElementById("authPassword"),
+      btnRegister: document.getElementById("btnRegister"), btnLogin: document.getElementById("btnLogin"), btnLogout: document.getElementById("btnLogout"), authState: document.getElementById("authState"),
+      adminKey: document.getElementById("adminKey"), localName: document.getElementById("localName"), localEmail: document.getElementById("localEmail"), localPassword: document.getElementById("localPassword"),
+      btnLocalCreate: document.getElementById("btnLocalCreate"), btnLoadUsers: document.getElementById("btnLoadUsers"), usersOutput: document.getElementById("usersOutput"),
+      btnProducts: document.getElementById("btnProducts"), btnCreateOrder: document.getElementById("btnCreateOrder"), btnSimEvent: document.getElementById("btnSimEvent"), apiOutput: document.getElementById("apiOutput"),
+      url: document.getElementById("webhookUrl"), method: document.getElementById("method"), type: document.getElementById("contentType"), template: document.getElementById("template"), payload: document.getElementById("payload"),
+      btnFormat: document.getElementById("btnFormat"), btnCurl: document.getElementById("btnCurl"), btnSend: document.getElementById("btnSend"), status: document.getElementById("status"),
+      savedList: document.getElementById("savedList"), btnSave: document.getElementById("btnSave"), btnLoad: document.getElementById("btnLoad"), btnDelete: document.getElementById("btnDelete"), curl: document.getElementById("curlCmd"),
+      btnClear: document.getElementById("btnClear"), history: document.getElementById("history")
+    };
+    const state = { history: JSON.parse(localStorage.getItem("n8n_lab_history") || "[]"), endpoints: JSON.parse(localStorage.getItem("n8n_lab_endpoints") || "[]"), theme: localStorage.getItem("n8n_lab_theme") || "dark", apiBase: localStorage.getItem("n8n_lab_api_base") || window.location.origin, token: localStorage.getItem("n8n_lab_token") || "", user: JSON.parse(localStorage.getItem("n8n_lab_user") || "null") };
+    const normalizeApiBase = (v) => String(v || "").trim().replace(/\/+$/, "");
+    const authHeaders = (h = {}) => { if (state.token) h.Authorization = `Bearer ${state.token}`; if (el.adminKey.value.trim()) h["x-admin-key"] = el.adminKey.value.trim(); return h; };
+    function saveState() { localStorage.setItem("n8n_lab_history", JSON.stringify(state.history.slice(-20))); localStorage.setItem("n8n_lab_endpoints", JSON.stringify(state.endpoints)); localStorage.setItem("n8n_lab_theme", state.theme); localStorage.setItem("n8n_lab_api_base", state.apiBase); localStorage.setItem("n8n_lab_token", state.token || ""); localStorage.setItem("n8n_lab_user", JSON.stringify(state.user || null)); }
+    function setStatus(msg, k = "") { el.status.className = "status " + k; el.status.textContent = msg; }
+    function refreshAuthState() { el.authState.textContent = state.user ? `Logged in as ${state.user.email}` : "Not logged in."; }
+    function fillTemplate(name) { if (templates[name]) el.payload.value = JSON.stringify(templates[name], null, 2); updateCurl(); }
+    function updateCurl() { const p = (el.payload.value.trim() || "{}").replace(/'/g, "'\"'\"'"); el.curl.value = `curl -X ${el.method.value} "${el.url.value.trim()}" -H "Content-Type: ${el.type.value}" -d '${p}'`; }
+    function refreshSavedList() { el.savedList.innerHTML = ""; state.endpoints.forEach((x, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = x; el.savedList.appendChild(o); }); }
+    function refreshHistory() { el.history.innerHTML = state.history.slice().reverse().map(x => `<div class="history-item"><strong>${x.method}</strong> ${x.url}<div class="tiny">${x.httpStatus} - ${x.time}</div></div>`).join("") || '<p class="tiny">No history.</p>'; }
+    async function apiCall(path, options = {}) { const r = await fetch(`${normalizeApiBase(state.apiBase || el.apiBase.value || window.location.origin)}${path}`, options); const t = await r.text(); let d = t; try { d = JSON.parse(t); } catch (_) {} if (!r.ok) throw new Error((d && d.error) || t || `HTTP ${r.status}`); return d; }
+    function renderApiOutput(v) { el.apiOutput.value = typeof v === "string" ? v : JSON.stringify(v, null, 2); }
+
+    el.tabs.forEach((btn) => btn.addEventListener("click", () => { el.tabs.forEach((x) => x.classList.remove("active")); btn.classList.add("active"); el.windows.forEach((w) => w.classList.remove("active")); document.querySelector(`[data-window="${btn.dataset.tab}"]`).classList.add("active"); }));
+    el.btnTheme.addEventListener("click", () => { state.theme = state.theme === "dark" ? "light" : "dark"; el.body.dataset.theme = state.theme; saveState(); });
+    el.apiBase.addEventListener("change", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); });
+    el.btnRegister.addEventListener("click", async () => { try { const d = await apiCall("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: el.authName.value, email: el.authEmail.value, password: el.authPassword.value }) }); renderApiOutput(d); } catch (e) { renderApiOutput(e.message); } });
+    el.btnLogin.addEventListener("click", async () => { try { const d = await apiCall("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: el.authEmail.value, password: el.authPassword.value }) }); state.token = d.token; state.user = d.user; saveState(); refreshAuthState(); renderApiOutput(d); } catch (e) { renderApiOutput(e.message); } });
+    el.btnLogout.addEventListener("click", () => { state.token = ""; state.user = null; saveState(); refreshAuthState(); });
+    el.btnLoadUsers.addEventListener("click", async () => { try { const d = await apiCall("/api/admin/users", { headers: authHeaders() }); el.usersOutput.value = JSON.stringify(d, null, 2); } catch (e) { el.usersOutput.value = e.message; } });
+    el.btnLocalCreate.addEventListener("click", async () => { try { const d = await apiCall("/api/admin/users", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: el.localName.value, email: el.localEmail.value, password: el.localPassword.value }) }); el.usersOutput.value = JSON.stringify(d, null, 2); } catch (e) { el.usersOutput.value = e.message; } });
+    el.btnProducts.addEventListener("click", async () => { try { renderApiOutput(await apiCall("/api/products")); } catch (e) { renderApiOutput(e.message); } });
+    el.btnCreateOrder.addEventListener("click", async () => { try { renderApiOutput(await apiCall("/api/orders", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ items: [{ productId: "prod_1", qty: 1 }] }) })); } catch (e) { renderApiOutput(e.message); } });
+    el.btnSimEvent.addEventListener("click", async () => { try { renderApiOutput(await apiCall("/api/events/simulate", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ type: "lead.created", payload: { email: "lead@example.com", score: 80 } }) })); } catch (e) { renderApiOutput(e.message); } });
+    el.template.addEventListener("change", () => { if (el.template.value !== "custom") fillTemplate(el.template.value); });
+    [el.url, el.method, el.type, el.payload].forEach((n) => { n.addEventListener("input", updateCurl); n.addEventListener("change", updateCurl); });
+    el.btnFormat.addEventListener("click", () => { try { el.payload.value = JSON.stringify(JSON.parse(el.payload.value || "{}"), null, 2); setStatus("JSON formatted.", "ok"); } catch (_) { setStatus("Invalid JSON.", "err"); } updateCurl(); });
+    el.btnCurl.addEventListener("click", () => { updateCurl(); setStatus("curl generated.", "ok"); });
+    el.btnSend.addEventListener("click", async () => { try { const body = el.method.value === "GET" ? undefined : (el.type.value === "application/json" ? JSON.stringify(JSON.parse(el.payload.value || "{}")) : el.payload.value); const res = await fetch(el.url.value.trim(), { method: el.method.value, headers: { "Content-Type": el.type.value }, body }); const text = await res.text(); state.history.push({ url: el.url.value.trim(), method: el.method.value, time: new Date().toLocaleString(), httpStatus: res.status, response: text }); saveState(); refreshHistory(); setStatus(`HTTP ${res.status}`, "ok"); } catch (e) { setStatus(e.message, "err"); } });
+    el.btnSave.addEventListener("click", () => { const u = el.url.value.trim(); if (!u) return; if (!state.endpoints.includes(u)) state.endpoints.push(u); saveState(); refreshSavedList(); });
+    el.btnLoad.addEventListener("click", () => { const i = Number(el.savedList.value); if (!Number.isNaN(i)) el.url.value = state.endpoints[i] || ""; updateCurl(); });
+    el.btnDelete.addEventListener("click", () => { const i = Number(el.savedList.value); if (Number.isNaN(i)) return; state.endpoints.splice(i, 1); saveState(); refreshSavedList(); });
+    el.btnClear.addEventListener("click", () => { state.history = []; saveState(); refreshHistory(); });
+
+    el.body.dataset.theme = state.theme; el.apiBase.value = state.apiBase; refreshAuthState(); fillTemplate("lead"); refreshSavedList(); refreshHistory(); updateCurl();
+  </script>
+</body>
+</html>
