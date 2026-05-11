@@ -307,7 +307,16 @@ async function hydrateUserRole(req, res, next) {
 }
 
 function requireStaff(req, res, next) {
-  if (req.user.role !== "staff") return res.status(403).json({ error: "Staff access required" });
+  if (req.user.role !== "staff") {
+    return res.status(403).json({
+      error: "Staff access required",
+      resolvedRole: req.user.role || null,
+      hint:
+        req.user.role === "customer"
+          ? "Contul tău în Postgres este customer. Folosește LAB_STAFF_PROMOTE + LAB_STAFF_EMAIL pentru același email sau schimbă rolul manual în DB."
+          : undefined
+    });
+  }
   next();
 }
 
@@ -883,6 +892,11 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const user = await loginUserRow(email, password);
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (user.role === "staff") {
+      return res.status(403).json({
+        error: "Staff must use POST /api/lab/auth/login — legacy /api/auth/login is customer-only."
+      });
+    }
     const token = signUserToken(user);
     res.json({
       token,
@@ -900,13 +914,34 @@ const labDir = path.join(publicDir, "lab");
 
 app.get("/", (_req, res) => res.redirect(302, "/store/"));
 
-app.use("/store", express.static(storeDir, { fallthrough: true }));
+function noStoreForIndexHtml(res, filePath) {
+  if (filePath.replace(/\\/g, "/").endsWith("/index.html")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+  }
+}
+
+app.use(
+  "/store",
+  express.static(storeDir, {
+    fallthrough: true,
+    setHeaders: (res, filePath) => noStoreForIndexHtml(res, filePath)
+  })
+);
 app.use("/store", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.sendFile(path.join(storeDir, "index.html"));
 });
 
-app.use("/lab", express.static(labDir, { fallthrough: true }));
+app.use(
+  "/lab",
+  express.static(labDir, {
+    fallthrough: true,
+    setHeaders: (res, filePath) => noStoreForIndexHtml(res, filePath)
+  })
+);
 app.use("/lab", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.sendFile(path.join(labDir, "index.html"));
 });
 

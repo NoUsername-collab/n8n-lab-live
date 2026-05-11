@@ -272,7 +272,10 @@
     function refreshAuthState() {
       const logged = Boolean(state.user);
       el.authState.className = "status " + (logged ? "ok" : "warn");
-      el.authState.textContent = logged ? `Staff: ${state.user.email}` : "Nu esti conectat ca staff.";
+      const r = logged ? state.user.role || "?" : "";
+      el.authState.textContent = logged
+        ? `Conectat: ${state.user.email} · rol ${r}${r === "staff" ? "" : " — pentru lab ai nevoie de staff în DB + POST /api/lab/auth/login"}`
+        : "Nu esti conectat.";
       el.loginCredentials.style.display = logged ? "none" : "";
       el.loggedInBar.style.display = logged ? "flex" : "none";
       el.loginPanelTitle.textContent = logged ? "Sesiune staff" : "Staff login";
@@ -296,7 +299,22 @@
     function updateCurl() { const p = (el.payload.value.trim() || "{}").replace(/'/g, "'\"'\"'"); el.curl.value = `curl -X ${el.method.value} "${el.url.value.trim()}" -H "Content-Type: ${el.type.value}" -d '${p}'`; }
     function refreshSavedList() { el.savedList.innerHTML = ""; state.endpoints.forEach((x, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = x; el.savedList.appendChild(o); }); }
     function refreshHistory() { el.history.innerHTML = state.history.slice().reverse().map((x) => `<div class="history-item"><strong>${x.method}</strong> ${x.url}<div class="tiny">${x.httpStatus} - ${x.time}</div></div>`).join("") || '<p class="tiny">No history.</p>'; }
-    async function apiCall(path, options = {}) { const base = normalizeApiBase(state.apiBase || el.apiBase.value || window.location.origin); const r = await fetch(`${base}${path}`, options); const t = await r.text(); let d = t; try { d = JSON.parse(t); } catch (_) {} if (!r.ok) throw new Error((d && d.error) || t || `HTTP ${r.status}`); return d; }
+    async function apiCall(path, options = {}) {
+      const base = normalizeApiBase(state.apiBase || el.apiBase.value || window.location.origin);
+      const r = await fetch(`${base}${path}`, options);
+      const t = await r.text();
+      let d = t;
+      try {
+        d = JSON.parse(t);
+      } catch (_) {}
+      if (!r.ok) {
+        let msg = (d && d.error) || t || `HTTP ${r.status}`;
+        if (d && d.resolvedRole != null) msg += ` (rol în DB: ${d.resolvedRole})`;
+        if (d && d.hint) msg += ` — ${d.hint}`;
+        throw new Error(msg);
+      }
+      return d;
+    }
     const renderApiOutput = (v) => { el.apiOutput.value = typeof v === "string" ? v : JSON.stringify(v, null, 2); };
 
     function formatWhen(iso) {
@@ -461,6 +479,9 @@
     el.btnLogin.addEventListener("click", () => setLoading(el.btnLogin, "Login...", async () => {
       try {
         const d = await apiCall("/api/lab/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: el.loginEmail.value.trim(), password: el.loginPassword.value }) });
+        if (d.user && d.user.role !== "staff") {
+          throw new Error("Server a returnat un cont non-staff — nu folosi POST /api/auth/login pentru lab; reîncearcă sau verifică deploy.");
+        }
         state.token = d.token; state.user = d.user; saveState(); refreshAuthState(); refreshBadges(); setStatus("Login successful.", "ok"); toast("Logged in");
         await refreshMyAccount();
         await fetchActivityFeed();
