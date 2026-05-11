@@ -17,6 +17,8 @@ services:
         sync: false
       - key: LAB_STAFF_NAME
         sync: false
+      - key: LAB_ALLOW_MANUAL_USERS
+        sync: false
       - key: STORE_HOST
         sync: false
       - key: LAB_HOST

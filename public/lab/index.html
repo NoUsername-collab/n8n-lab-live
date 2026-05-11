@@ -213,14 +213,19 @@
       <div id="adminLock" class="admin-lock">Admin e blocat pana faci <strong>Staff login</strong>.</div>
       <div id="adminContent" class="grid" style="display:none;">
         <div class="panel">
-          <h2>Creează client (test magazin)</h2>
-          <div class="row">
-            <div><label for="localName">Name</label><input id="localName" /></div>
-            <div><label for="localEmail">Email</label><input id="localEmail" /></div>
-            <div><label for="localPassword">Password</label><input id="localPassword" type="password" /></div>
+          <h2>Creează client din lab</h2>
+          <p id="localCreateBanner" class="tiny" style="margin:0 0 10px;">Se încarcă setările server…</p>
+          <div id="localCreateForm">
+            <div class="row">
+              <div><label for="localName">Name</label><input id="localName" /></div>
+              <div><label for="localEmail">Email</label><input id="localEmail" /></div>
+              <div><label for="localPassword">Password</label><input id="localPassword" type="password" /></div>
+            </div>
+            <div class="btn-row">
+              <button id="btnLocalCreate" class="btn-success">Create local user</button>
+            </div>
           </div>
-          <div class="btn-row">
-            <button id="btnLocalCreate" class="btn-success">Create local user</button>
+          <div class="btn-row" style="margin-top:10px;">
             <button id="btnLoadUsers" class="btn-primary">Refresh users</button>
           </div>
         </div>
@@ -253,6 +258,7 @@
       labCustomerId: document.getElementById("labCustomerId"),
       adminLock: document.getElementById("adminLock"), adminContent: document.getElementById("adminContent"),
       myAccountPanel: document.getElementById("myAccountPanel"), myAccountBody: document.getElementById("myAccountBody"), myAccountError: document.getElementById("myAccountError"),
+      localCreateBanner: document.getElementById("localCreateBanner"), localCreateForm: document.getElementById("localCreateForm"),
       localName: document.getElementById("localName"), localEmail: document.getElementById("localEmail"), localPassword: document.getElementById("localPassword"), btnLocalCreate: document.getElementById("btnLocalCreate"), btnLoadUsers: document.getElementById("btnLoadUsers"),
       usersTableBody: document.getElementById("usersTableBody"), usersEmpty: document.getElementById("usersEmpty"),
       btnRefreshActivity: document.getElementById("btnRefreshActivity"), activityLive: document.getElementById("activityLive"), activityTimeline: document.getElementById("activityTimeline"), activityHint: document.getElementById("activityHint"),
@@ -261,7 +267,7 @@
       btnFormat: document.getElementById("btnFormat"), btnCurl: document.getElementById("btnCurl"), btnSend: document.getElementById("btnSend"), status: document.getElementById("status"),
       savedList: document.getElementById("savedList"), btnSave: document.getElementById("btnSave"), btnLoad: document.getElementById("btnLoad"), btnDelete: document.getElementById("btnDelete"), btnClear: document.getElementById("btnClear"), curl: document.getElementById("curlCmd"), history: document.getElementById("history")
     };
-    const state = { history: JSON.parse(localStorage.getItem("n8n_lab_history") || "[]"), endpoints: JSON.parse(localStorage.getItem("n8n_lab_endpoints") || "[]"), theme: localStorage.getItem("n8n_lab_theme") || "dark", apiBase: localStorage.getItem("n8n_lab_api_base") || window.location.origin, token: localStorage.getItem("n8n_lab_token") || "", user: JSON.parse(localStorage.getItem("n8n_lab_user") || "null"), activityPollId: null };
+    const state = { history: JSON.parse(localStorage.getItem("n8n_lab_history") || "[]"), endpoints: JSON.parse(localStorage.getItem("n8n_lab_endpoints") || "[]"), theme: localStorage.getItem("n8n_lab_theme") || "dark", apiBase: localStorage.getItem("n8n_lab_api_base") || window.location.origin, token: localStorage.getItem("n8n_lab_token") || "", user: JSON.parse(localStorage.getItem("n8n_lab_user") || "null"), activityPollId: null, labManualUserCreate: false };
     const normalizeApiBase = (v) => String(v || "").trim().replace(/\/+$/, "");
     const authHeaders = (h = {}) => { if (state.token) h.Authorization = `Bearer ${state.token}`; return h; };
     const saveState = () => { localStorage.setItem("n8n_lab_history", JSON.stringify(state.history.slice(-20))); localStorage.setItem("n8n_lab_endpoints", JSON.stringify(state.endpoints)); localStorage.setItem("n8n_lab_theme", state.theme); localStorage.setItem("n8n_lab_api_base", state.apiBase); localStorage.setItem("n8n_lab_token", state.token || ""); localStorage.setItem("n8n_lab_user", JSON.stringify(state.user || null)); };
@@ -285,6 +291,22 @@
       if (el.tabAuthBtn) el.tabAuthBtn.textContent = logged ? "Staff ✓" : "Staff";
       void refreshMyAccount();
     }
+    async function syncLabFlags() {
+      try {
+        const h = await apiCall("/api/health");
+        state.labManualUserCreate = Boolean(h.lab && h.lab.manualUserCreate);
+      } catch (_) {
+        state.labManualUserCreate = false;
+      }
+      const on = state.labManualUserCreate;
+      if (el.localCreateForm) el.localCreateForm.style.display = on ? "" : "none";
+      if (el.localCreateBanner) {
+        el.localCreateBanner.textContent = on
+          ? "Activ: poți crea conturi customer din lab (doar dev). Clienți reali: preferă înregistrarea din /store/."
+          : "Oprit: LAB_ALLOW_MANUAL_USERS nu e activ. Clienți reali doar din /store/ (register). Pentru test rapid în dev, pune LAB_ALLOW_MANUAL_USERS=true în env.";
+      }
+    }
+
     function refreshBadges() {
       const apiReady = Boolean(normalizeApiBase(state.apiBase));
       el.badgeApi.textContent = apiReady ? "API configured" : "API disconnected"; el.badgeApi.classList.toggle("on", apiReady);
@@ -474,7 +496,7 @@
     }));
     el.themeSelect.addEventListener("change", () => { state.theme = el.themeSelect.value === "light" ? "light" : "dark"; el.body.dataset.theme = state.theme; saveState(); toast("Theme updated"); });
     el.btnSaveSettings.addEventListener("click", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); setSettingsStatus("Settings saved.", "ok"); refreshBadges(); toast("Settings saved"); });
-    el.btnPing.addEventListener("click", () => setLoading(el.btnPing, "Testing...", async () => { try { state.apiBase = normalizeApiBase(el.apiBase.value); const d = await apiCall("/api/health"); setSettingsStatus(`Health OK (${d.db})`, "ok"); toast("API is healthy", "ok"); refreshBadges(); } catch (e) { setSettingsStatus(e.message, "err"); toast("API test failed", "err"); } }));
+    el.btnPing.addEventListener("click", () => setLoading(el.btnPing, "Testing...", async () => { try { state.apiBase = normalizeApiBase(el.apiBase.value); const d = await apiCall("/api/health"); await syncLabFlags(); setSettingsStatus(`Health OK (${d.db})`, "ok"); toast("API is healthy", "ok"); refreshBadges(); } catch (e) { setSettingsStatus(e.message, "err"); toast("API test failed", "err"); } }));
 
     el.btnLogin.addEventListener("click", () => setLoading(el.btnLogin, "Login...", async () => {
       try {
@@ -505,7 +527,7 @@
     }));
     el.btnLocalCreate.addEventListener("click", () => setLoading(el.btnLocalCreate, "Creating...", async () => {
       try {
-        await apiCall("/api/lab/admin/users", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: el.localName.value.trim(), email: el.localEmail.value.trim(), password: el.localPassword.value, role: "customer" }) });
+        await apiCall("/api/lab/admin/users", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: el.localName.value.trim(), email: el.localEmail.value.trim(), password: el.localPassword.value }) });
         await loadUsersList();
         toast("Local user created");
       } catch (e) {
@@ -544,7 +566,7 @@
     el.btnClear.addEventListener("click", () => { state.history = []; saveState(); refreshHistory(); toast("History cleared"); });
 
     el.body.dataset.theme = state.theme; el.themeSelect.value = state.theme; el.apiBase.value = state.apiBase;
-    refreshAuthState(); refreshBadges(); fillTemplate("lead"); refreshSavedList(); refreshHistory(); updateCurl();
+    refreshAuthState(); refreshBadges(); void syncLabFlags(); fillTemplate("lead"); refreshSavedList(); refreshHistory(); updateCurl();
     renderUsersTable({ items: [] });
     fetchActivityFeed();
     startActivityPollIfNeeded();

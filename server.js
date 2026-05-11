@@ -16,6 +16,8 @@ const LAB_STAFF_EMAIL = (process.env.LAB_STAFF_EMAIL || "").trim().toLowerCase()
 const LAB_STAFF_PASSWORD = process.env.LAB_STAFF_PASSWORD || "";
 const LAB_STAFF_NAME = process.env.LAB_STAFF_NAME || "Lab Staff";
 const LAB_STAFF_PROMOTE = process.env.LAB_STAFF_PROMOTE === "true" || process.env.LAB_STAFF_PROMOTE === "1";
+/** Doar dacă e true: POST /api/lab/admin/users poate crea clienți din lab. În producție lasă false — clienți reali doar din /store/register. */
+const LAB_ALLOW_MANUAL_USERS = process.env.LAB_ALLOW_MANUAL_USERS === "true" || process.env.LAB_ALLOW_MANUAL_USERS === "1";
 const STORE_HOST = (process.env.STORE_HOST || "").trim().toLowerCase();
 const LAB_HOST = (process.env.LAB_HOST || "").trim().toLowerCase();
 const N8N_ORDER_WEBHOOK_URL = (process.env.N8N_ORDER_WEBHOOK_URL || "").trim();
@@ -419,6 +421,10 @@ app.get("/api/health", (_req, res) => {
     db: "postgres",
     now: new Date().toISOString(),
     hosts: { storeHost: STORE_HOST || null, labHost: LAB_HOST || null },
+    lab: {
+      manualUserCreate: LAB_ALLOW_MANUAL_USERS,
+      staffFromEnv: Boolean(LAB_STAFF_EMAIL && LAB_STAFF_PASSWORD)
+    },
     webhooks: {
       order: Boolean(N8N_ORDER_WEBHOOK_URL),
       lead: Boolean(N8N_LEAD_WEBHOOK_URL),
@@ -820,7 +826,18 @@ app.post("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, asy
   const { email, password, name, role } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });
-  const r = role === "staff" ? "staff" : "customer";
+  if (role === "staff") {
+    return res.status(403).json({
+      error: "Staff cannot be created via API",
+      hint: "Singurul staff automat este din LAB_STAFF_EMAIL + LAB_STAFF_PASSWORD la boot; client existent → LAB_STAFF_PROMOTE."
+    });
+  }
+  if (!LAB_ALLOW_MANUAL_USERS) {
+    return res.status(403).json({
+      error: "Lab manual user creation is disabled",
+      hint: "Clienți reali: POST /api/store/auth/register sau formularul din /store/. Pentru dev local setează LAB_ALLOW_MANUAL_USERS=true."
+    });
+  }
 
   try {
     const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
@@ -828,8 +845,8 @@ app.post("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, asy
 
     const passwordHash = await bcrypt.hash(password, 10);
     const result = await query(
-      `INSERT INTO users (id, email, name, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, created_at`,
-      [nanoid(10), email, name || "User", passwordHash, r]
+      `INSERT INTO users (id, email, name, password_hash, role) VALUES ($1, $2, $3, $4, 'customer') RETURNING id, email, name, role, created_at`,
+      [nanoid(10), email, name || "User", passwordHash]
     );
 
     res.status(201).json(publicUser(result.rows[0], { includeRole: true }));

@@ -5,14 +5,15 @@ Playground for learning **n8n** with a clean split:
 | Surface | URL | Who | Purpose |
 |--------|-----|-----|---------|
 | **Magazin (demo e-commerce)** | `/store/` | Testers, clients | Catalog, coș, cont **client**, comenzi, **rezervări**, lead public |
-| **Lab (staff)** | `/lab/` | Doar echipa | Webhook-uri, timeline evenimente, simulări, listă useri + cheie admin |
+| **Lab (staff)** | `/lab/` | Doar echipa | Webhook-uri, timeline, listă useri (fără creare automată de conturi în plus) |
 | **API** | `/api/...` | Both | JSON pentru workflow-uri n8n |
 
 ## Arhitectură
 
-- **`users.role`**: `customer` (magazin) sau `staff` (lab). Înregistrarea publică creează doar **customer**. Staff se creează din env **`LAB_STAFF_EMAIL`** + **`LAB_STAFF_PASSWORD`** la primul boot (dacă emailul nu există).
+- **`users.role`**: `customer` (magazin) sau `staff` (lab). **Clienți reali** doar prin **`/store/`** (`POST /api/store/auth/register`). **Un singur cont staff** poate fi creat automat la boot din **`LAB_STAFF_EMAIL`** + **`LAB_STAFF_PASSWORD`** dacă acel email **nu există** încă în DB. Nu există „înregistrare staff” în UI — nu se poate crea `staff` prin API.
+- **`LAB_ALLOW_MANUAL_USERS`**: dacă **nu** e `true`, **`POST /api/lab/admin/users`** e dezactivat (implicit în producție fără env = oprit). În `.env` local pune `LAB_ALLOW_MANUAL_USERS=true` doar dacă vrei butonul din lab pentru conturi de test.
 - **Store API** — prefix **`/api/store/`** (login/register doar clienți; lead fără auth).
-- **Lab API** — prefix **`/api/lab/`** (JWT **staff**). Lista / creare useri test: **`/api/lab/admin/users`** (doar staff, fără cheie separată).
+- **Lab API** — prefix **`/api/lab/`** (JWT **staff**). Lista useri: **`GET /api/lab/admin/users`**. Creare user din lab: **`POST /api/lab/admin/users`** doar dacă **`LAB_ALLOW_MANUAL_USERS=true`** și creează **doar** `customer` (niciodată staff).
 - **Staff vs „admin”** — există doar **rolul `staff` în Postgres** + login la `/lab/`. Nu mai există **`ADMIN_KEY`** / `x-admin-key` pentru acest proiect (era confuz și dublu). Dacă ai folosit același email ca la magazin înainte să fii staff, setează **`LAB_STAFF_PROMOTE=true`** în Render și redeploy: la boot, acel user devine `staff` și primește parola din **`LAB_STAFF_PASSWORD`**.
 - **Evenimente** (`order.created`, `lead.created`, `booking.requested`, …) în **`events`**; staff le vede în lab. Leaduri în **`leads`**, rezervări în **`bookings`**.
 - **Webhook-uri outbound** (opțional): după commit în DB, serverul trimite `POST` JSON către `N8N_*_WEBHOOK_URL`. Semnătură opțională HMAC-SHA256 în header **`X-Lab-Signature: sha256=<hex>`** dacă setezi **`N8N_WEBHOOK_SECRET`** (verifică în n8n cu Crypto node).
@@ -39,7 +40,7 @@ npm start
 
 **Public / magazin**
 
-- `GET /api/health` — include steaguri `webhooks`, `hosts`, `rateLimit`
+- `GET /api/health` — `webhooks`, `hosts`, `rateLimit`, `lab.manualUserCreate`, `lab.staffFromEnv`
 - `GET /api/store/products` · `GET /api/store/products/:idOrSlug`
 - `POST /api/store/auth/register` · `POST /api/store/auth/login` (doar customer)
 - `POST /api/store/leads` (fără auth, rate limit)
@@ -56,17 +57,27 @@ npm start
 - `POST /api/lab/orders` — body `{ "customerUserId", "items" }` (test din lab)
 - `GET /api/lab/leads`
 - `GET /api/lab/bookings`
-- `GET /api/lab/admin/users` · `POST /api/lab/admin/users` (JWT staff)
+- `GET /api/lab/admin/users` · `POST /api/lab/admin/users` (JWT staff; POST doar customer + doar dacă `LAB_ALLOW_MANUAL_USERS=true`)
 - `GET /api/lab/n8n/webhook-payload/order-created/:id`
 
 **Legacy (compat)**
 
 - `GET /api/products` — același catalog ca store
-- `POST /api/auth/login` — login unic (customer sau staff); preferă rutele `/api/store/` și `/api/lab/`.
+- `POST /api/auth/login` — doar **customer** (staff trebuie `POST /api/lab/auth/login`).
 
 ## Deploy (Render)
 
-Setează variabile: `DATABASE_URL`, `JWT_SECRET`, `LAB_STAFF_EMAIL`, `LAB_STAFF_PASSWORD`, opțional `LAB_STAFF_PROMOTE=true`, `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit. Poți șterge `ADMIN_KEY` din Render dacă îl mai ai — nu mai e folosit.
+Setează variabile: `DATABASE_URL`, `JWT_SECRET`, `LAB_STAFF_EMAIL`, `LAB_STAFF_PASSWORD`, opțional `LAB_STAFF_PROMOTE=true`, `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit. **`LAB_ALLOW_MANUAL_USERS`** nu seta (sau `false`) pe producție ca să nu se mai poată crea conturi din lab. Poți șterge `ADMIN_KEY` dacă îl mai ai.
+
+### Reset conturi în Postgres („supă” de useri de test)
+
+Păstrezi produsele; ștergi toți userii și datele legate; la următorul restart se recreează **un singur** staff din `LAB_STAFF_*`:
+
+```sql
+TRUNCATE TABLE order_items, orders, bookings, leads, events, users RESTART IDENTITY CASCADE;
+```
+
+Apoi redeploy / restart app (rulează `ensureStaffUser` și inserează din nou staff-ul din env dacă emailul nu există).
 
 După deploy: URL-ul serviciului = și **API Base** în lab, și originea pentru fetch în magazin (același host).
 
