@@ -212,6 +212,15 @@ app.get("/api/me", authRequired, (req, res) => {
   res.json({ user: req.user });
 });
 
+app.get("/api/account", authRequired, (req, res) => {
+  query(`SELECT id, email, name, created_at FROM users WHERE id = $1 LIMIT 1`, [req.user.sub])
+    .then((result) => {
+      if (!result.rowCount) return res.status(404).json({ error: "User not found in database" });
+      res.json({ account: publicUser(result.rows[0]) });
+    })
+    .catch((error) => res.status(500).json({ error: "Failed to load account", detail: error.message }));
+});
+
 app.get("/api/products", (_req, res) => {
   query(`SELECT id, name, price::float AS price, currency, stock FROM products ORDER BY name ASC`)
     .then((result) => res.json({ items: result.rows }))

@@ -187,6 +187,15 @@
             <button id="btnLogout" class="btn-danger">Logout</button>
           </div>
           <div id="authState" class="status">Not logged in.</div>
+          <div id="myAccountPanel" class="panel" style="margin-top:12px; padding:12px; display:none; border:1px solid var(--border); border-radius:12px; background:var(--card);">
+            <h3 style="margin:0 0 8px;">Contul tau in Postgres</h3>
+            <p class="tiny" style="margin:0 0 8px;">Verificare fara Admin Key: acelasi user cu care te-ai logat.</p>
+            <table class="data-table" style="margin:0;">
+              <thead><tr><th>Name</th><th>Email</th><th>ID</th><th>Created</th></tr></thead>
+              <tbody id="myAccountBody"></tbody>
+            </table>
+            <p id="myAccountError" class="tiny" style="color:var(--danger); margin-top:8px; display:none;"></p>
+          </div>
         </div>
       </div>
     </section>
@@ -200,8 +209,9 @@
           <button id="btnSaveSettings" class="btn-primary">Save settings</button>
           <button id="btnPing" class="btn-success">Test API health</button>
         </div>
-        <label for="adminKey">Admin Key</label>
-        <input id="adminKey" placeholder="ADMIN_KEY din Render" />
+        <label for="adminKey">Admin Key (obligatoriu pe Render daca ai setat <code>ADMIN_KEY</code>)</label>
+        <input id="adminKey" placeholder="Lipeste exact valoarea din Render → Environment" />
+        <p class="tiny">Fara aceasta cheie, <strong>lista completa de useri</strong> (Refresh users) primeste 403 — userul exista in DB, dar API-ul refuza lista. Contul tau il vezi oricum in tab-ul Auth dupa login.</p>
         <div id="settingsStatus" class="status">Settings not tested yet.</div>
       </div>
       <div id="adminLock" class="admin-lock">Admin panel e blocat pana faci login in tab-ul Auth.</div>
@@ -244,6 +254,7 @@
       authName: document.getElementById("authName"), authEmail: document.getElementById("authEmail"), authPassword: document.getElementById("authPassword"), loginEmail: document.getElementById("loginEmail"), loginPassword: document.getElementById("loginPassword"),
       btnRegister: document.getElementById("btnRegister"), btnLogin: document.getElementById("btnLogin"), btnLogout: document.getElementById("btnLogout"), authState: document.getElementById("authState"),
       adminKey: document.getElementById("adminKey"), adminLock: document.getElementById("adminLock"), adminContent: document.getElementById("adminContent"),
+      myAccountPanel: document.getElementById("myAccountPanel"), myAccountBody: document.getElementById("myAccountBody"), myAccountError: document.getElementById("myAccountError"),
       localName: document.getElementById("localName"), localEmail: document.getElementById("localEmail"), localPassword: document.getElementById("localPassword"), btnLocalCreate: document.getElementById("btnLocalCreate"), btnLoadUsers: document.getElementById("btnLoadUsers"),
       usersTableBody: document.getElementById("usersTableBody"), usersEmpty: document.getElementById("usersEmpty"),
       btnRefreshActivity: document.getElementById("btnRefreshActivity"), activityLive: document.getElementById("activityLive"), activityTimeline: document.getElementById("activityTimeline"), activityHint: document.getElementById("activityHint"),
@@ -256,11 +267,16 @@
     const normalizeApiBase = (v) => String(v || "").trim().replace(/\/+$/, "");
     const authHeaders = (h = {}) => { if (state.token) h.Authorization = `Bearer ${state.token}`; if (el.adminKey.value.trim()) h["x-admin-key"] = el.adminKey.value.trim(); return h; };
     const saveState = () => { localStorage.setItem("n8n_lab_history", JSON.stringify(state.history.slice(-20))); localStorage.setItem("n8n_lab_endpoints", JSON.stringify(state.endpoints)); localStorage.setItem("n8n_lab_theme", state.theme); localStorage.setItem("n8n_lab_api_base", state.apiBase); localStorage.setItem("n8n_lab_token", state.token || ""); localStorage.setItem("n8n_lab_user", JSON.stringify(state.user || null)); };
+    const saveAdminKey = () => { localStorage.setItem("n8n_lab_admin_key", el.adminKey.value); refreshBadges(); };
     const setStatus = (m, k = "") => { el.status.className = "status " + k; el.status.textContent = m; };
     const setSettingsStatus = (m, k = "") => { el.settingsStatus.className = "status " + k; el.settingsStatus.textContent = m; };
     function toast(message, kind = "ok") { const t = document.createElement("div"); t.className = `toast ${kind}`; t.textContent = message; el.toasts.appendChild(t); setTimeout(() => t.remove(), 2800); }
     function setLoading(button, loadingText, promiseFactory) { const old = button.textContent; button.disabled = true; button.textContent = loadingText; return promiseFactory().finally(() => { button.disabled = false; button.textContent = old; }); }
-    function refreshAuthState() { el.authState.className = "status " + (state.user ? "ok" : "warn"); el.authState.textContent = state.user ? `Logged in as ${state.user.email}` : "Not logged in."; }
+    function refreshAuthState() {
+      el.authState.className = "status " + (state.user ? "ok" : "warn");
+      el.authState.textContent = state.user ? `Logged in as ${state.user.email}` : "Not logged in.";
+      void refreshMyAccount();
+    }
     function refreshBadges() {
       const apiReady = Boolean(normalizeApiBase(state.apiBase));
       el.badgeApi.textContent = apiReady ? "API configured" : "API disconnected"; el.badgeApi.classList.toggle("on", apiReady);
@@ -280,11 +296,58 @@
       try { const d = new Date(iso); return isNaN(d) ? String(iso) : d.toLocaleString(); } catch (_) { return String(iso); }
     }
 
+    async function refreshMyAccount() {
+      el.myAccountError.style.display = "none";
+      el.myAccountError.textContent = "";
+      if (!state.token) {
+        el.myAccountPanel.style.display = "none";
+        el.myAccountBody.innerHTML = "";
+        return;
+      }
+      el.myAccountPanel.style.display = "block";
+      try {
+        const d = await apiCall("/api/account", { headers: { Authorization: `Bearer ${state.token}` } });
+        const u = d.account;
+        el.myAccountBody.innerHTML = "";
+        const tr = document.createElement("tr");
+        ["name", "email", "id", "createdAt"].forEach((k) => {
+          const td = document.createElement("td");
+          if (k === "id") td.className = "mono";
+          td.textContent = k === "createdAt" ? formatWhen(u[k]) : (u[k] || "—");
+          tr.appendChild(td);
+        });
+        el.myAccountBody.appendChild(tr);
+      } catch (e) {
+        el.myAccountError.textContent = e.message || "Nu s-a putut incarca contul.";
+        el.myAccountError.style.display = "block";
+      }
+    }
+
+    async function loadUsersList() {
+      try {
+        el.usersEmpty.innerHTML = "";
+        el.usersEmpty.textContent = "No users yet. Create one or refresh.";
+        const d = await apiCall("/api/admin/users", { headers: authHeaders() });
+        renderUsersTable(d);
+        setSettingsStatus(`Lista incarcata: ${(d.items || []).length} user(i).`, "ok");
+      } catch (e) {
+        const msg = String(e.message || "");
+        renderUsersTable({ items: [] });
+        el.usersEmpty.style.display = "block";
+        if (msg.includes("403") || msg.toLowerCase().includes("admin") || msg.toLowerCase().includes("invalid")) {
+          el.usersEmpty.innerHTML = "Lista completa e blocata: lipseste sau e gresit <strong>Admin Key</strong> (acelasi cu <code>ADMIN_KEY</code> din Render). Completeaza campul din Admin → Save, apoi <strong>Refresh users</strong>. Userul tau exista — vezi sectiunea <strong>Contul tau in Postgres</strong> mai sus.";
+        } else {
+          el.usersEmpty.textContent = msg || "Load failed";
+        }
+        setSettingsStatus(msg, "err");
+        throw e;
+      }
+    }
+
     function renderUsersTable(data) {
       el.usersTableBody.innerHTML = "";
       const items = (data && data.items) ? data.items : [];
       el.usersEmpty.style.display = items.length ? "none" : "block";
-      if (!items.length) el.usersEmpty.textContent = "No users yet. Create one or refresh.";
       items.forEach((u) => {
         const tr = document.createElement("tr");
         const tdName = document.createElement("td"); tdName.textContent = u.name || "—";
@@ -374,11 +437,12 @@
       el.windows.forEach((w) => w.classList.remove("active"));
       document.querySelector(`[data-window="${btn.dataset.tab}"]`).classList.add("active");
       if (btn.dataset.tab === "app") fetchActivityFeed();
+      if (btn.dataset.tab === "admin" && state.user) loadUsersList().catch(() => {});
     }));
     el.themeSelect.addEventListener("change", () => { state.theme = el.themeSelect.value === "light" ? "light" : "dark"; el.body.dataset.theme = state.theme; saveState(); toast("Theme updated"); });
-    el.adminKey.addEventListener("input", refreshBadges);
+    el.adminKey.addEventListener("input", () => { refreshBadges(); saveAdminKey(); });
 
-    el.btnSaveSettings.addEventListener("click", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); setSettingsStatus("Settings saved.", "ok"); refreshBadges(); toast("Settings saved"); });
+    el.btnSaveSettings.addEventListener("click", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); saveAdminKey(); setSettingsStatus("Settings saved.", "ok"); refreshBadges(); toast("Settings saved"); });
     el.btnPing.addEventListener("click", () => setLoading(el.btnPing, "Testing...", async () => { try { state.apiBase = normalizeApiBase(el.apiBase.value); const d = await apiCall("/api/health"); setSettingsStatus(`Health OK (${d.db})`, "ok"); toast("API is healthy", "ok"); refreshBadges(); } catch (e) { setSettingsStatus(e.message, "err"); toast("API test failed", "err"); } }));
 
     el.btnRegister.addEventListener("click", () => setLoading(el.btnRegister, "Creating...", async () => {
@@ -395,6 +459,7 @@
       try {
         const d = await apiCall("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: el.loginEmail.value.trim(), password: el.loginPassword.value }) });
         state.token = d.token; state.user = d.user; saveState(); refreshAuthState(); refreshBadges(); setStatus("Login successful.", "ok"); toast("Logged in");
+        await refreshMyAccount();
         await fetchActivityFeed();
         startActivityPollIfNeeded();
       } catch (e) { setStatus(e.message, "err"); toast("Login failed", "err"); }
@@ -408,21 +473,16 @@
     });
     el.btnLoadUsers.addEventListener("click", () => setLoading(el.btnLoadUsers, "Loading...", async () => {
       try {
-        const d = await apiCall("/api/admin/users", { headers: authHeaders() });
-        renderUsersTable(d);
+        await loadUsersList();
         toast("Users refreshed");
       } catch (e) {
-        renderUsersTable({ items: [] });
-        el.usersEmpty.textContent = e.message || "Load failed";
-        el.usersEmpty.style.display = "block";
         toast("Users load failed", "err");
       }
     }));
     el.btnLocalCreate.addEventListener("click", () => setLoading(el.btnLocalCreate, "Creating...", async () => {
       try {
         await apiCall("/api/admin/users", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: el.localName.value.trim(), email: el.localEmail.value.trim(), password: el.localPassword.value }) });
-        const d = await apiCall("/api/admin/users", { headers: authHeaders() });
-        renderUsersTable(d);
+        await loadUsersList();
         toast("Local user created");
       } catch (e) {
         toast("Create local user failed", "err");
@@ -458,6 +518,7 @@
     el.btnClear.addEventListener("click", () => { state.history = []; saveState(); refreshHistory(); toast("History cleared"); });
 
     el.body.dataset.theme = state.theme; el.themeSelect.value = state.theme; el.apiBase.value = state.apiBase;
+    el.adminKey.value = localStorage.getItem("n8n_lab_admin_key") || "";
     refreshAuthState(); refreshBadges(); fillTemplate("lead"); refreshSavedList(); refreshHistory(); updateCurl();
     renderUsersTable({ items: [] });
     fetchActivityFeed();

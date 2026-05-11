@@ -38,6 +38,9 @@ npm start
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/me` (auth)
+- `GET /api/account` (auth) — reads your row from `users` (no admin key; use this to confirm the account exists after login)
+
+**Admin user list:** `GET /api/admin/users` is protected when `ADMIN_KEY` is set on the server. The lab UI must send the same value in **Admin Key** (`x-admin-key`). Without it, the list returns 403 even though login and `/api/account` work.
 - `GET /api/products`
 - `POST /api/orders` (auth)
 - `GET /api/orders` (auth)
