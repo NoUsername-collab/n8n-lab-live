@@ -11,11 +11,11 @@ const app = express();
 app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const LAB_STAFF_EMAIL = (process.env.LAB_STAFF_EMAIL || "").trim().toLowerCase();
 const LAB_STAFF_PASSWORD = process.env.LAB_STAFF_PASSWORD || "";
 const LAB_STAFF_NAME = process.env.LAB_STAFF_NAME || "Lab Staff";
+const LAB_STAFF_PROMOTE = process.env.LAB_STAFF_PROMOTE === "true" || process.env.LAB_STAFF_PROMOTE === "1";
 const STORE_HOST = (process.env.STORE_HOST || "").trim().toLowerCase();
 const LAB_HOST = (process.env.LAB_HOST || "").trim().toLowerCase();
 const N8N_ORDER_WEBHOOK_URL = (process.env.N8N_ORDER_WEBHOOK_URL || "").trim();
@@ -242,6 +242,21 @@ async function migrate() {
   }
 }
 
+/**
+ * Dacă emailul din LAB_STAFF_EMAIL exista deja ca **client**, ensureStaffUser nu îl crea.
+ * Setează LAB_STAFF_PROMOTE=true ca la fiecare boot să faci UPDATE: role=staff + parola din env.
+ */
+async function promoteStaffFromEnv() {
+  if (!LAB_STAFF_PROMOTE || !LAB_STAFF_EMAIL || !LAB_STAFF_PASSWORD) return;
+  const passwordHash = await bcrypt.hash(LAB_STAFF_PASSWORD, 10);
+  const r = await query(
+    `UPDATE users SET role = 'staff', password_hash = $1, name = COALESCE(NULLIF(TRIM(name), ''), $3) WHERE lower(email) = lower($2)`,
+    [passwordHash, LAB_STAFF_EMAIL, LAB_STAFF_NAME]
+  );
+  if (r.rowCount) console.log(`[init] LAB_STAFF_PROMOTE: ${LAB_STAFF_EMAIL} → staff (parola actualizată din env).`);
+  else console.warn(`[init] LAB_STAFF_PROMOTE: niciun rând pentru ${LAB_STAFF_EMAIL} — se va încerca crearea cu ensureStaffUser.`);
+}
+
 async function ensureStaffUser() {
   if (!LAB_STAFF_EMAIL || !LAB_STAFF_PASSWORD) return;
   const existing = await query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [LAB_STAFF_EMAIL]);
@@ -256,6 +271,7 @@ async function ensureStaffUser() {
 
 async function initDb() {
   await migrate();
+  await promoteStaffFromEnv();
   await ensureStaffUser();
 }
 
@@ -297,13 +313,6 @@ function requireStaff(req, res, next) {
 
 function requireCustomer(req, res, next) {
   if (req.user.role !== "customer") return res.status(403).json({ error: "Customer token required — use the public store at /store/" });
-  next();
-}
-
-function adminGuard(req, res, next) {
-  if (!ADMIN_KEY) return next();
-  const key = req.headers["x-admin-key"];
-  if (key !== ADMIN_KEY) return res.status(403).json({ error: "Invalid admin key" });
   next();
 }
 
@@ -792,13 +801,13 @@ app.get("/api/lab/leads", verifyToken, hydrateUserRole, requireStaff, (_req, res
     .catch((error) => res.status(500).json({ error: "Failed to fetch leads", detail: error.message }));
 });
 
-app.get("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, adminGuard, (_req, res) => {
+app.get("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, (_req, res) => {
   query(`SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC`)
     .then((result) => res.json({ items: result.rows.map((row) => publicUser(row, { includeRole: true })) }))
     .catch((error) => res.status(500).json({ error: "Failed to fetch users", detail: error.message }));
 });
 
-app.post("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, adminGuard, async (req, res) => {
+app.post("/api/lab/admin/users", verifyToken, hydrateUserRole, requireStaff, async (req, res) => {
   const { email, password, name, role } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 chars" });

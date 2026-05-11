@@ -17,8 +17,6 @@ services:
         sync: false
       - key: LAB_STAFF_NAME
         sync: false
-      - key: ADMIN_KEY
-        sync: false
       - key: STORE_HOST
         sync: false
       - key: LAB_HOST

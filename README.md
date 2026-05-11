@@ -12,7 +12,8 @@ Playground for learning **n8n** with a clean split:
 
 - **`users.role`**: `customer` (magazin) sau `staff` (lab). Înregistrarea publică creează doar **customer**. Staff se creează din env **`LAB_STAFF_EMAIL`** + **`LAB_STAFF_PASSWORD`** la primul boot (dacă emailul nu există).
 - **Store API** — prefix **`/api/store/`** (login/register doar clienți; lead fără auth).
-- **Lab API** — prefix **`/api/lab/`** (necesită JWT **staff**). Gestionarea listei de useri: **`/api/lab/admin/users`** + opțional header **`x-admin-key`** dacă `ADMIN_KEY` e setat pe server.
+- **Lab API** — prefix **`/api/lab/`** (JWT **staff**). Lista / creare useri test: **`/api/lab/admin/users`** (doar staff, fără cheie separată).
+- **Staff vs „admin”** — există doar **rolul `staff` în Postgres** + login la `/lab/`. Nu mai există **`ADMIN_KEY`** / `x-admin-key` pentru acest proiect (era confuz și dublu). Dacă ai folosit același email ca la magazin înainte să fii staff, setează **`LAB_STAFF_PROMOTE=true`** în Render și redeploy: la boot, acel user devine `staff` și primește parola din **`LAB_STAFF_PASSWORD`**.
 - **Evenimente** (`order.created`, `lead.created`, `booking.requested`, …) în **`events`**; staff le vede în lab. Leaduri în **`leads`**, rezervări în **`bookings`**.
 - **Webhook-uri outbound** (opțional): după commit în DB, serverul trimite `POST` JSON către `N8N_*_WEBHOOK_URL`. Semnătură opțională HMAC-SHA256 în header **`X-Lab-Signature: sha256=<hex>`** dacă setezi **`N8N_WEBHOOK_SECRET`** (verifică în n8n cu Crypto node).
 - **Rate limit** comun pentru **`POST /api/store/leads`** și **`POST /api/store/bookings`**: `STORE_PUBLIC_RATE_MAX` cereri / `STORE_PUBLIC_RATE_WINDOW_MS` per IP (implicit 40 / 15 min). Răspuns **429** + `retryAfterSec`.
@@ -55,7 +56,7 @@ npm start
 - `POST /api/lab/orders` — body `{ "customerUserId", "items" }` (test din lab)
 - `GET /api/lab/leads`
 - `GET /api/lab/bookings`
-- `GET /api/lab/admin/users` · `POST /api/lab/admin/users` (+ `x-admin-key` dacă `ADMIN_KEY` e setat)
+- `GET /api/lab/admin/users` · `POST /api/lab/admin/users` (JWT staff)
 - `GET /api/lab/n8n/webhook-payload/order-created/:id`
 
 **Legacy (compat)**
@@ -65,7 +66,7 @@ npm start
 
 ## Deploy (Render)
 
-Setează variabile: `DATABASE_URL`, `JWT_SECRET`, `LAB_STAFF_EMAIL`, `LAB_STAFF_PASSWORD`, opțional `ADMIN_KEY`, `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit.
+Setează variabile: `DATABASE_URL`, `JWT_SECRET`, `LAB_STAFF_EMAIL`, `LAB_STAFF_PASSWORD`, opțional `LAB_STAFF_PROMOTE=true`, `LAB_STAFF_NAME`, webhook-uri `N8N_*`, `N8N_WEBHOOK_SECRET`, `STORE_HOST` / `LAB_HOST`, rate limit. Poți șterge `ADMIN_KEY` din Render dacă îl mai ai — nu mai e folosit.
 
 După deploy: URL-ul serviciului = și **API Base** în lab, și originea pentru fetch în magazin (același host).
 

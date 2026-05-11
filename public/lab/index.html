@@ -89,11 +89,11 @@
     <div class="header">
       <div class="header-left">
         <h1>n8n Lab · Staff</h1>
-        <p class="muted">Console interna (webhook, evenimente, admin). <a href="/store/" style="color:var(--accent);">Magazin public →</a></p>
+        <p class="muted">Console interna: webhook, evenimente, listă clienți. <a href="/store/" style="color:var(--accent);">Magazin public →</a></p>
         <div class="badges">
           <span id="badgeApi" class="badge">API disconnected</span>
           <span id="badgeAuth" class="badge">Not logged in</span>
-          <span id="badgeAdmin" class="badge">Admin key missing</span>
+          <span id="badgeRole" class="badge">Staff DB</span>
         </div>
       </div>
       <div class="header-right">
@@ -207,9 +207,7 @@
           <button id="btnSaveSettings" class="btn-primary">Save settings</button>
           <button id="btnPing" class="btn-success">Test API health</button>
         </div>
-        <label for="adminKey">Admin Key (obligatoriu pe Render daca ai setat <code>ADMIN_KEY</code>)</label>
-        <input id="adminKey" placeholder="Lipeste exact valoarea din Render → Environment" />
-        <p class="tiny">Lista useri magazin: <code>GET /api/lab/admin/users</code> — fără <code>ADMIN_KEY</code> pe server merge fără header; pe Render pune aceeași valoare ca în env.</p>
+        <p class="tiny">Lista clienți: <code>GET /api/lab/admin/users</code> — doar cu <strong>JWT staff</strong> (fără cheie separată).</p>
         <div id="settingsStatus" class="status">Settings not tested yet.</div>
       </div>
       <div id="adminLock" class="admin-lock">Admin e blocat pana faci <strong>Staff login</strong>.</div>
@@ -247,13 +245,13 @@
     const el = {
       body: document.body, toasts: document.getElementById("toasts"), themeSelect: document.getElementById("themeSelect"),
       tabs: [...document.querySelectorAll(".tab-btn")], tabAuthBtn: document.getElementById("tabAuthBtn"), windows: [...document.querySelectorAll(".window")],
-      badgeApi: document.getElementById("badgeApi"), badgeAuth: document.getElementById("badgeAuth"), badgeAdmin: document.getElementById("badgeAdmin"),
+      badgeApi: document.getElementById("badgeApi"), badgeAuth: document.getElementById("badgeAuth"), badgeRole: document.getElementById("badgeRole"),
       apiBase: document.getElementById("apiBase"), btnSaveSettings: document.getElementById("btnSaveSettings"), btnPing: document.getElementById("btnPing"), settingsStatus: document.getElementById("settingsStatus"),
       loginPanel: document.getElementById("loginPanel"), loginPanelTitle: document.getElementById("loginPanelTitle"), loginPanelHint: document.getElementById("loginPanelHint"), loginCredentials: document.getElementById("loginCredentials"), loggedInBar: document.getElementById("loggedInBar"),
       loginEmail: document.getElementById("loginEmail"), loginPassword: document.getElementById("loginPassword"),
       btnLogin: document.getElementById("btnLogin"), btnLogout: document.getElementById("btnLogout"), authState: document.getElementById("authState"),
       labCustomerId: document.getElementById("labCustomerId"),
-      adminKey: document.getElementById("adminKey"), adminLock: document.getElementById("adminLock"), adminContent: document.getElementById("adminContent"),
+      adminLock: document.getElementById("adminLock"), adminContent: document.getElementById("adminContent"),
       myAccountPanel: document.getElementById("myAccountPanel"), myAccountBody: document.getElementById("myAccountBody"), myAccountError: document.getElementById("myAccountError"),
       localName: document.getElementById("localName"), localEmail: document.getElementById("localEmail"), localPassword: document.getElementById("localPassword"), btnLocalCreate: document.getElementById("btnLocalCreate"), btnLoadUsers: document.getElementById("btnLoadUsers"),
       usersTableBody: document.getElementById("usersTableBody"), usersEmpty: document.getElementById("usersEmpty"),
@@ -265,9 +263,8 @@
     };
     const state = { history: JSON.parse(localStorage.getItem("n8n_lab_history") || "[]"), endpoints: JSON.parse(localStorage.getItem("n8n_lab_endpoints") || "[]"), theme: localStorage.getItem("n8n_lab_theme") || "dark", apiBase: localStorage.getItem("n8n_lab_api_base") || window.location.origin, token: localStorage.getItem("n8n_lab_token") || "", user: JSON.parse(localStorage.getItem("n8n_lab_user") || "null"), activityPollId: null };
     const normalizeApiBase = (v) => String(v || "").trim().replace(/\/+$/, "");
-    const authHeaders = (h = {}) => { if (state.token) h.Authorization = `Bearer ${state.token}`; if (el.adminKey.value.trim()) h["x-admin-key"] = el.adminKey.value.trim(); return h; };
+    const authHeaders = (h = {}) => { if (state.token) h.Authorization = `Bearer ${state.token}`; return h; };
     const saveState = () => { localStorage.setItem("n8n_lab_history", JSON.stringify(state.history.slice(-20))); localStorage.setItem("n8n_lab_endpoints", JSON.stringify(state.endpoints)); localStorage.setItem("n8n_lab_theme", state.theme); localStorage.setItem("n8n_lab_api_base", state.apiBase); localStorage.setItem("n8n_lab_token", state.token || ""); localStorage.setItem("n8n_lab_user", JSON.stringify(state.user || null)); };
-    const saveAdminKey = () => { localStorage.setItem("n8n_lab_admin_key", el.adminKey.value); refreshBadges(); };
     const setStatus = (m, k = "") => { el.status.className = "status " + k; el.status.textContent = m; };
     const setSettingsStatus = (m, k = "") => { el.settingsStatus.className = "status " + k; el.settingsStatus.textContent = m; };
     function toast(message, kind = "ok") { const t = document.createElement("div"); t.className = `toast ${kind}`; t.textContent = message; el.toasts.appendChild(t); setTimeout(() => t.remove(), 2800); }
@@ -289,7 +286,10 @@
       const apiReady = Boolean(normalizeApiBase(state.apiBase));
       el.badgeApi.textContent = apiReady ? "API configured" : "API disconnected"; el.badgeApi.classList.toggle("on", apiReady);
       const authReady = Boolean(state.user); el.badgeAuth.textContent = authReady ? `Logged: ${state.user.email}` : "Not logged in"; el.badgeAuth.classList.toggle("on", authReady);
-      const adminReady = Boolean(el.adminKey.value.trim()); el.badgeAdmin.textContent = adminReady ? "Admin key set" : "Admin key missing"; el.badgeAdmin.classList.toggle("on", adminReady);
+      const role = state.user && state.user.role;
+      const staffDb = Boolean(authReady && role === "staff");
+      el.badgeRole.textContent = !authReady ? "Staff DB" : staffDb ? "Rol: staff" : `Rol: ${role || "?"}`;
+      el.badgeRole.classList.toggle("on", staffDb);
       el.adminContent.style.display = authReady ? "grid" : "none"; el.adminLock.style.display = authReady ? "none" : "block";
     }
     function fillTemplate(name) { if (templates[name]) el.payload.value = JSON.stringify(templates[name], null, 2); updateCurl(); }
@@ -342,8 +342,8 @@
         const msg = String(e.message || "");
         renderUsersTable({ items: [] });
         el.usersEmpty.style.display = "block";
-        if (msg.includes("403") || msg.toLowerCase().includes("admin") || msg.toLowerCase().includes("invalid")) {
-          el.usersEmpty.innerHTML = "Lista e blocata: lipseste sau e gresit <strong>Admin Key</strong> (<code>ADMIN_KEY</code> din Render). Completeaza in Admin → Save → <strong>Refresh users</strong>.";
+        if (msg.toLowerCase().includes("staff")) {
+          el.usersEmpty.innerHTML = "Acces staff respins: fă <strong>Logout</strong>, apoi login din nou. Dacă emailul tău era client înainte, pe Render setează <code>LAB_STAFF_PROMOTE=true</code> și redeploy (vezi README).";
         } else {
           el.usersEmpty.textContent = msg || "Load failed";
         }
@@ -455,9 +455,7 @@
       if (btn.dataset.tab === "admin" && state.user) loadUsersList().catch(() => {});
     }));
     el.themeSelect.addEventListener("change", () => { state.theme = el.themeSelect.value === "light" ? "light" : "dark"; el.body.dataset.theme = state.theme; saveState(); toast("Theme updated"); });
-    el.adminKey.addEventListener("input", () => { refreshBadges(); saveAdminKey(); });
-
-    el.btnSaveSettings.addEventListener("click", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); saveAdminKey(); setSettingsStatus("Settings saved.", "ok"); refreshBadges(); toast("Settings saved"); });
+    el.btnSaveSettings.addEventListener("click", () => { state.apiBase = normalizeApiBase(el.apiBase.value); saveState(); setSettingsStatus("Settings saved.", "ok"); refreshBadges(); toast("Settings saved"); });
     el.btnPing.addEventListener("click", () => setLoading(el.btnPing, "Testing...", async () => { try { state.apiBase = normalizeApiBase(el.apiBase.value); const d = await apiCall("/api/health"); setSettingsStatus(`Health OK (${d.db})`, "ok"); toast("API is healthy", "ok"); refreshBadges(); } catch (e) { setSettingsStatus(e.message, "err"); toast("API test failed", "err"); } }));
 
     el.btnLogin.addEventListener("click", () => setLoading(el.btnLogin, "Login...", async () => {
@@ -525,7 +523,6 @@
     el.btnClear.addEventListener("click", () => { state.history = []; saveState(); refreshHistory(); toast("History cleared"); });
 
     el.body.dataset.theme = state.theme; el.themeSelect.value = state.theme; el.apiBase.value = state.apiBase;
-    el.adminKey.value = localStorage.getItem("n8n_lab_admin_key") || "";
     refreshAuthState(); refreshBadges(); fillTemplate("lead"); refreshSavedList(); refreshHistory(); updateCurl();
     renderUsersTable({ items: [] });
     fetchActivityFeed();
